@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "genki-node": {
+      "command": "genki-mcp",
+      "args": []
+    }
+  }
+}
