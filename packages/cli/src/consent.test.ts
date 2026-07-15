@@ -20,6 +20,7 @@ describe("session consent", () => {
     expect(rendered).toContain("1 hour");
     expect(rendered).toContain("3 tasks");
     expect(rendered).toContain("node");
+    expect(rendered).toContain("automatically approved");
     expect(rendered).not.toContain("repository");
     expect(rendered).not.toContain("instructions");
     expect(rendered).not.toContain("patch");

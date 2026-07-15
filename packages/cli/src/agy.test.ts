@@ -1,4 +1,7 @@
 import { EventEmitter } from "node:events";
+import { mkdtemp } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { AgyLaunchError, buildAgyArgs, runAgy } from "./agy.js";
@@ -14,6 +17,7 @@ describe("Agy launch", () => {
 
     expect(args).toEqual([
       "--sandbox",
+      "--dangerously-skip-permissions",
       "--new-project",
       "--add-dir",
       "/tmp/genki/session-1",
@@ -43,9 +47,28 @@ describe("Agy launch", () => {
         command: "definitely-missing-agy-command",
         args: [],
         environment: {},
+        workingDirectory: "/tmp",
         stdio: "ignore"
       })
     ).rejects.toThrow(AgyLaunchError);
+  });
+
+  it("runs the host inside the marked session directory", async () => {
+    const workingDirectory = await mkdtemp(path.join(os.tmpdir(), "genki-agy-cwd-"));
+
+    await expect(
+      runAgy({
+        command: process.execPath,
+        args: [
+          "-e",
+          "const fs=require('node:fs'); process.exit(fs.realpathSync(process.cwd()) === fs.realpathSync(process.argv[1]) ? 0 : 2)",
+          workingDirectory
+        ],
+        environment: process.env,
+        workingDirectory,
+        stdio: "ignore"
+      })
+    ).resolves.toBe(0);
   });
 
   it("forwards Ctrl-C to Agy and resolves before local cleanup", async () => {
@@ -54,6 +77,7 @@ describe("Agy launch", () => {
       command: process.execPath,
       args: ["-e", "setTimeout(() => process.exit(0), 200)"],
       environment: process.env,
+      workingDirectory: "/tmp",
       stdio: "ignore" as const,
       signalSource: signals
     } as unknown as Parameters<typeof runAgy>[0];

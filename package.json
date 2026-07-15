@@ -13,7 +13,9 @@
   },
   "files": [
     "dist/",
-    "plugins/agy/",
+    "plugins/agy/plugin.json",
+    "plugins/agy/mcp_config.json",
+    "plugins/agy/skills/genki-contribution/SKILL.md",
     "README.md"
   ],
   "scripts": {

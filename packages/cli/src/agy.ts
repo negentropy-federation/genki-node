@@ -12,6 +12,7 @@ interface RunAgyInput {
   command?: string;
   args: string[];
   environment: NodeJS.ProcessEnv;
+  workingDirectory: string;
   stdio?: StdioOptions;
   signalSource?: SignalSource;
 }
@@ -31,6 +32,7 @@ export class AgyLaunchError extends Error {
 export function buildAgyArgs(session: AgySession): string[] {
   const args = [
     "--sandbox",
+    "--dangerously-skip-permissions",
     "--new-project",
     "--add-dir",
     session.sessionRoot,
@@ -51,6 +53,7 @@ export async function runAgy(input: RunAgyInput): Promise<number> {
   const command = input.command ?? "agy";
   return await new Promise<number>((resolve, reject) => {
     const child = spawn(command, input.args, {
+      cwd: input.workingDirectory,
       env: input.environment,
       shell: false,
       stdio: input.stdio ?? "inherit"

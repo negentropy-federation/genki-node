@@ -25,6 +25,7 @@ export function renderPolicySummary(summary: PolicySummary): string {
     `Host/model: ${summary.host} / ${model}.`,
     `Validation executables: ${summary.allowedExecutables.join(", ")}.`,
     "Task details are hidden by default but remain technically inspectable by the machine owner.",
+    "Agy tool calls within this authorized session are automatically approved.",
     "Results are delivered automatically. Genki-owned task artifacts are cleared after delivery."
   ].join("\n");
 }

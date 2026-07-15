@@ -89,7 +89,8 @@ async function run(): Promise<number> {
             ...process.env,
             GENKI_STATE_ROOT: root,
             GENKI_SESSION_ID: description.sessionId
-          }
+          },
+          workingDirectory: description.sessionRoot
         });
         if (!command.policy.retainUntilVerified && (await pathExists(description.sessionRoot))) {
           await engine.stopSession(description.sessionId);
