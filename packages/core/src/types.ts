@@ -65,3 +65,32 @@ export interface GenericSessionStatus {
   remainingRuntimeSeconds: number;
   lastOutcomeCode: string | null;
 }
+
+export interface OwnershipMarker {
+  format: "genki-owned-v1";
+  kind: "session" | "task-run";
+  sessionId: string;
+  runId?: string;
+  createdAt: string;
+}
+
+export interface SessionPaths {
+  stateRoot: string;
+  root: string;
+  markerPath: string;
+  sessionFile: string;
+  runsRoot: string;
+  agyLogPath: string;
+}
+
+export interface TaskRunPaths {
+  root: string;
+  markerPath: string;
+  runFile: string;
+  workspace: string;
+  temporaryHome: string;
+}
+
+export interface CleanupReport {
+  removedPaths: string[];
+}
