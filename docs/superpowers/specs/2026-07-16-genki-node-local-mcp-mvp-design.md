@@ -1,45 +1,60 @@
 # Genki Node Local MCP MVP Design
 
 Date: 2026-07-16
-Status: Approved in conversation; awaiting final written-spec review
+Status: Revised after review; awaiting final written-spec approval
 
 ## Summary
 
-Genki Node MVP is a local contribution agent that runs a user-authored coding task through Agy, inside a disposable repository clone, and produces a reviewed patch and structured local result. It is packaged as an Agy plugin for the first real-world test while keeping its task, policy, workspace, audit, and result logic independent of Agy.
+Genki Node MVP is a local contribution agent that runs coding tasks through Agy in disposable repository clones. A contributor grants one bounded authorization when starting a contribution session. Tasks inside that policy envelope run without per-task prompts, their content is not proactively shown in the user interface, results are delivered without a final approval prompt, and deterministic local code removes Genki-controlled task artifacts afterward.
 
 The integration boundary is a local Model Context Protocol (MCP) server. Agy starts the server over `stdio`; the server does not listen on a TCP port or run as a background daemon. Codex and Claude Code integrations can later reuse the same MCP server and core packages.
 
-This MVP is deliberately local. It does not connect to Federation One, calculate Signal, pull remote tasks, submit results over a network, or collect provider credentials.
+This MVP is local. It reads tasks from a local test queue and delivers results to a local test sink. It does not connect to Federation One, calculate Signal, or collect provider credentials.
+
+## Privacy Boundary
+
+Genki Node can keep task details out of its normal status UI and delete files it controls. It cannot make task content technically inaccessible to the owner or administrator of the machine executing that task. A device owner can inspect processes, temporary files, memory, host-agent records, or operating-system activity.
+
+The product promise for the MVP is therefore:
+
+- Task content is hidden by default, not cryptographically hidden from the device owner.
+- Genki Node does not intentionally render task instructions, repository content, patches, or command output in its contributor status UI.
+- Genki-owned task payloads, clones, patches, validation output, temporary homes, journals, and redirected Agy CLI logs are removed by deterministic cleanup code.
+- Genki Node does not claim to delete Agy's global conversation databases, Agy history, provider-side records, terminal scrollback, backups, filesystem snapshots, or operating-system logs.
 
 ## Goals
 
 - Install and validate Genki Node as a real Agy plugin.
-- Run one local coding task against a clean local Git repository using Agy.
-- Require explicit user confirmation before execution and before saving a result.
-- Keep the source repository and its Git metadata unchanged.
+- Start a time- and resource-bounded contribution session with one explicit user authorization.
+- Process local coding tasks through Agy without per-task or final-result confirmations.
+- Keep task content out of the normal contributor-facing status flow.
+- Keep source repositories and their Git metadata unchanged.
 - Execute only predeclared validation commands through the Genki Node policy layer.
-- Produce a patch, test report, and minimal audit record without provider credentials or full model transcripts.
+- Deliver structured results automatically, then purge Genki-controlled task artifacts without a model call.
 - Establish a host-neutral MCP and core architecture that can later support Codex and Claude Code.
 
 ## Non-Goals
 
-- Federation One connectivity or remote task dispatch.
-- Signal calculation, contribution submission, or public contribution accounting.
+- Federation One connectivity, remote dispatch, or remote result upload.
+- Signal calculation or contribution accounting.
 - GitHub Issues, pull requests, commits, pushes, or automatic patch application.
 - Docker or operating-system-grade sandboxing.
 - Private repositories, submodules, production deployment, or cloud actions.
 - Direct provider API integrations, API-key storage, subscription pooling, or credential forwarding.
-- A long-running local daemon, TCP listener, web interface, or desktop tray interface.
+- A long-running TCP service, web interface, or desktop tray interface.
 - Codex and Claude Code adapters in the MVP release.
+- Guaranteed secrecy from the machine owner.
+- Deletion of logs or records owned by Agy, a model provider, the terminal, the operating system, backup software, or filesystem snapshots.
 
 ## Architecture
 
-The repository is a TypeScript monorepo with four runtime boundaries:
+The repository is a TypeScript monorepo with five runtime boundaries:
 
-1. **Core** owns task validation, run state, policy decisions, repository preparation, audit events, and result construction. It does not import Agy- or MCP-specific code.
+1. **Core** owns session policy, task validation, run state, repository preparation, ephemeral journals, result construction, and cleanup. It does not import Agy- or MCP-specific code.
 2. **MCP Server** exposes core operations as local `stdio` tools. It owns no model credentials and performs no remote requests.
-3. **CLI** provides local inspection, run launch, run listing, and cleanup. The primary command `genki run --host agy <task-file>` launches Agy with sandbox mode and the task context.
-4. **Agy Plugin** contains the Agy manifest, MCP configuration, and Genki workflow skill. It is a thin adapter and contains no contribution-accounting or workspace logic.
+3. **CLI** starts and stops contribution sessions, launches Agy, reports generic session status, and provides a model-free cleanup command.
+4. **Agy Plugin** contains the Agy manifest, MCP configuration, and contribution workflow skill. It is a thin host adapter.
+5. **Local Test Harness** supplies local tasks and acknowledges local results so the complete lifecycle can be tested without Federation One.
 
 Planned repository structure:
 
@@ -55,17 +70,47 @@ genki-node/
     tasks/
   tests/
     fixtures/
+    local-harness/
   docs/
     superpowers/
       specs/
       plans/
 ```
 
-The MCP server is launched on demand by the host through `stdio`. There is no port selection, local network authentication, PID file, or daemon lifecycle in the MVP.
+The MCP server is launched on demand over `stdio`. There is no port selection, local network authentication, PID file, or independently running daemon in the MVP.
+
+## Contribution Session Policy
+
+The contributor authorizes a session policy, not individual task content. The user-visible authorization summary includes:
+
+- Session duration and absolute expiry time.
+- Maximum number of tasks.
+- Maximum total runtime and per-task runtime.
+- Host and model selection.
+- Repository class: local public-test fixtures only in the MVP.
+- Allowed validation executable names.
+- Maximum changed files and patch bytes per task.
+- A statement that task details are hidden by default but technically inspectable by the machine owner.
+- A statement that successful and failed results are delivered automatically.
+- The paths Genki Node controls and will clean.
+- A persistent pause/stop control that revokes authorization immediately.
+
+The MVP CLI accepts explicit session limits. A representative launch is:
+
+```bash
+genki contribute \
+  --host agy \
+  --task-dir /absolute/path/to/local-task-queue \
+  --duration 8h \
+  --max-tasks 10 \
+  --max-total-runtime 2h
+```
+
+No task can start after the session expires, reaches a limit, or is revoked. A task already running when authorization is revoked is terminated before cleanup.
 
 ## Local Task Format
 
-Tasks are versioned JSON files. The MVP schema is:
+Tasks are versioned JSON files consumed internally by the plugin and test harness. They are not rendered in the normal contributor UI.
 
 ```json
 {
@@ -100,80 +145,90 @@ Validation rules:
 - Repositories containing configured Git submodules are rejected.
 - Absolute symlinks and symlinks whose normalized target escapes the repository are rejected.
 - `instructions` must be non-empty and no longer than 20,000 UTF-8 bytes.
-- Each validation command is an argument array. Shell strings, redirection, pipes, command substitution, and inline environment assignment are not accepted.
-- At least one validation command is required.
-- Policy limits must be positive and cannot exceed implementation-wide ceilings documented by the CLI.
+- Validation commands are argument arrays. Shell strings, redirection, pipes, command substitution, and inline environment assignments are rejected.
+- Every executable must be allowed by both the session policy and the task policy.
+- Task limits must fit entirely inside the remaining session limits.
 
-After validation, the core resolves `baseRef` to a commit and computes a SHA-256 task digest over the normalized task and resolved commit. Consent and all later state transitions bind to this digest.
+The core resolves `baseRef` to a commit and computes a SHA-256 task digest over the normalized task and resolved commit. The task digest is used for result provenance but is not displayed in the normal status UI.
 
-## Run Lifecycle
+## State Machines
 
-A run follows this state machine:
+The session state machine is:
 
 ```text
-inspected
-  -> awaiting_execution_consent
+configured
+  -> awaiting_session_consent
+  -> active
+  -> draining
+  -> closed | expired | revoked
+```
+
+The task state machine inside an active session is:
+
+```text
+queued
+  -> policy_checked
   -> prepared
   -> executing
   -> validating
-  -> finalized
-  -> awaiting_result_consent
-  -> approved | failed | discarded
+  -> finalizing
+  -> delivered
+  -> purged
 
-Any active state may become cancelled, failed, or frozen.
+Any active task state may become failed or frozen, then purged.
 ```
 
-- `cancelled` means the user stopped the run or Agy ended before completion.
-- `failed` means a normal operation prevented completion, or the user chose to save a local debugging bundle whose validation commands did not all pass.
-- `frozen` means a policy invariant was violated. Frozen runs cannot be approved.
-
-A nonzero validation exit does not skip finalization: the user can still inspect the patch and validation report. If the user saves that bundle, the terminal state is `failed`; only a bundle with passing validation can become `approved`.
-
-The server records each transition as an append-only JSON Lines event. It rejects transitions that are out of order, use the wrong run identifier, or present a task digest different from the inspected task.
+There is no `awaiting_execution_consent` per task and no `awaiting_result_consent`. The single session authorization permits every task that fits the displayed session policy. Policy mismatches are rejected automatically rather than escalated through another prompt.
 
 ## MCP Tool Contract
 
-The MVP exposes six host-neutral tools.
+The MVP exposes seven host-neutral tools.
 
-### `genki_inspect_task`
+### `genki_describe_session`
 
-Input: absolute task-file path.
+Input: proposed session limits and local task-queue path.
 
-Behavior: parses and validates the task, resolves the repository commit, checks repository cleanliness and unsupported features, computes the task digest, and returns a consent summary. It does not create a clone.
+Behavior: validates limits and returns the user-visible policy summary. It does not read or reveal queued task content and does not start a session.
 
-The summary includes task title, repository path, resolved commit, instructions, validation commands, runtime and output limits, host name, and all data that may be saved.
+### `genki_activate_session`
 
-### `genki_prepare_run`
+Input: policy digest and an explicit session-consent assertion from the host.
 
-Input: task-file path, task digest, and an explicit execution-consent assertion from the host.
+Behavior: verifies the digest, records the one authorization event, activates the session, and returns only generic status fields.
 
-Behavior: revalidates the task and digest, records the first consent, creates the disposable repository clone, creates an empty temporary home, and returns the run identifier and workspace path.
+The MCP server can record that the host asserted user consent, but it cannot cryptographically prove a human gave that consent. The Agy skill must not call this tool until the user has affirmatively accepted the policy summary.
 
-The MCP server can record that the host asserted user consent, but it cannot cryptographically prove a human gave that consent. The Agy skill must not call this tool until the user has replied affirmatively to the rendered summary.
+### `genki_prepare_next_task`
+
+Input: active session identifier.
+
+Behavior: reads the next local task, validates it against the session policy, creates a disposable local clone, and returns the workspace and task instructions to the host agent. The plugin does not echo this payload into its contributor-facing response.
 
 ### `genki_run_validation`
 
-Input: run identifier.
+Input: task-run identifier.
 
-Behavior: executes the exact validation argument arrays from the task in order, with individual and total time limits. It does not accept arbitrary commands from the host. It returns exit codes, durations, and bounded stdout/stderr summaries.
+Behavior: executes the exact validation argument arrays from the task in order, with individual, task, and session time limits. It does not accept arbitrary commands from the host.
 
-### `genki_finalize_run`
+### `genki_finalize_and_deliver`
 
-Input: run identifier.
+Input: task-run identifier.
 
-Behavior: calculates a binary-safe Git diff, changed-file count, patch size, validation summary, and provenance hashes. It freezes the run if any output policy is exceeded. A successfully finalized run moves to the second consent gate.
+Behavior: builds the patch and validation result, enforces output limits, delivers the result to the configured sink, records the sink acknowledgement, and immediately invokes deterministic task cleanup. It asks no user question.
 
-### `genki_approve_result`
+A task with failed validation is delivered with status `failed`, never as a successful contribution. A policy violation is delivered as bounded failure metadata without task content.
 
-Input: run identifier, result digest, and an explicit result-consent assertion from the host.
+### `genki_session_status`
 
-Behavior: verifies that the displayed result digest is current, records the second consent, and persists the approved result bundle. A run with failed validation may be saved as a local debugging result, but its status is `failed`, never `approved` or a successful contribution.
+Input: session identifier.
 
-### `genki_discard_run`
+Behavior: returns generic counters, elapsed time, remaining limits, active/paused state, and last outcome code. It does not return task titles, instructions, repository paths, patches, or command output.
 
-Input: run identifier.
+### `genki_stop_session`
 
-Behavior: marks the run discarded, deletes generated patch output and the disposable clone, and retains only the minimum cancellation audit events.
+Input: session identifier.
+
+Behavior: revokes authorization, terminates an active task, attempts final delivery of bounded failure metadata, runs deterministic cleanup, and closes the session. It does not call a model.
 
 ## Agy Experience
 
@@ -181,141 +236,164 @@ The Agy plugin supplies:
 
 - A valid Agy plugin manifest.
 - An MCP configuration that starts the local Genki MCP server over `stdio`.
-- A Genki workflow skill that recognizes requests to inspect or run a local task.
-- Instructions that require the two user confirmations and prohibit direct validation commands outside the MCP tool.
+- A contribution workflow skill that requests session authorization once.
+- Instructions that keep task payloads out of ordinary contributor-facing responses.
+- Instructions that process policy-compliant tasks without follow-up confirmation.
 
-The supported primary entry point is:
+The CLI creates an ephemeral session root, starts Agy with `--sandbox`, `--new-project`, and `--log-file <session-root>/agy.log`, and adds only the session root to the Agy workspace. After authorization, each disposable clone is created inside that already-authorized root.
 
-```bash
-genki run --host agy /absolute/path/to/task.json
-```
-
-The CLI creates an empty, ephemeral session root, adds that root to the Agy workspace, starts Agy in sandbox mode, and provides the task path. No repository clone exists at that point. After the first consent, the MCP server creates the disposable clone inside the already-authorized session root. Inside that session, the user can use natural language such as:
+The normal visible flow is limited to:
 
 ```text
-Run this Genki task.
+Contribution session ready: 8 hours, up to 10 tasks.
+Start contribution mode? [y/N]
+
+Contribution mode active. Press Ctrl-C to stop.
+Completed: 3  Failed: 1  Remaining: 6
+Contribution session closed. Local Genki artifacts cleared.
 ```
 
-Directly starting Agy and invoking the installed plugin is supported only when the user starts Agy with sandbox mode. The CLI-launched flow is the acceptance-test path because the MVP cannot independently prove that an already-running host session was sandboxed.
+Task titles, instructions, repository paths, patches, and test output are not proactively displayed. The machine owner can still inspect them using operating-system access, and the design does not claim otherwise.
 
-Agy remains responsible for its own authentication and model communication. Genki Node neither reads nor receives Agy credentials, session material, cookies, refresh tokens, or provider API keys.
+Agy remains responsible for authentication, model communication, and its own data stores. Genki Node does not receive Agy credentials, session material, cookies, refresh tokens, or provider API keys.
 
 ## Disposable Workspace
 
-After the first consent, Genki Node creates a run directory in its platform-specific local state directory and clones the source repository using local transport with hardlinks disabled. The clone checks out the resolved commit in a detached state.
+For each accepted task, Genki Node clones the source repository using local transport with hardlinks disabled and checks out the resolved commit in detached state. The clone has independent Git metadata.
 
-The source repository must be clean. This prevents an operator from mistaking uncommitted source changes for task input and makes the task digest reproducible.
+The source repository must be clean. Genki Node never commits, pushes, changes source refs, or applies the generated patch back to it.
 
-The disposable clone has independent Git metadata. Genki Node never commits, pushes, modifies refs in the source repository, or applies the generated patch back to it.
-
-On approval, discard, cancellation, or ordinary failure, the clone is removed. A crash may leave a run directory behind; the next CLI launch reports it, and `genki runs cleanup` removes expired or explicitly selected orphaned runs.
+The clone, task payload, empty temporary home, validation output, patch, and transient journal all live under the marked Genki session root. They are eligible for deterministic deletion as a single bounded tree after result delivery or failure handling.
 
 ## Process And Environment Policy
 
-Validation commands run with direct process spawning and `shell: false`.
+Validation commands use direct process spawning with `shell: false`.
 
-The child environment is constructed from an allowlist rather than copied from the parent. It contains only the executable search path, locale values, terminal type when needed, a run-specific temporary directory, a run-specific empty `HOME`, and explicit Genki metadata that contains no secret.
+The child environment is built from an allowlist. It contains only the executable search path, locale values, terminal type when needed, a run-specific temporary directory, a run-specific empty `HOME`, and non-secret Genki identifiers.
 
-Common provider keys, cloud credentials, Git credential variables, SSH agent variables, proxy credential variables, and arbitrary parent environment values are not inherited. Logs record environment variable names only when needed for a policy error; values are never recorded.
+Provider keys, cloud credentials, Git credential variables, SSH agent variables, proxy credential variables, and arbitrary parent environment values are not inherited. Environment values are never written to Genki logs.
 
-The MCP server itself performs no remote requests. Agy model communication is expected and remains under Agy's existing local account controls. Because the MVP does not require Docker or an operating-system network sandbox, it cannot technically guarantee that every process is unable to reach the network. Validation tasks must therefore rely only on files tracked in the cloned repository and tools already available on the machine; dependency installation is outside MVP validation. Network isolation is explicitly deferred to the container hardening phase.
+The MCP server performs no remote requests. Agy model communication remains under Agy's local account controls. Without Docker or an operating-system network sandbox, the MVP cannot technically guarantee that every host process is offline. Local test tasks must rely only on tracked files and machine-installed tools; dependency installation is outside MVP validation.
 
-## Audit And Results
+## Ephemeral Records And Result Delivery
 
-The run ledger is local and append-only. It records:
+Genki Node uses a minimal crash-recovery journal while a task is active. It contains identifiers, policy and task digests, state transitions, timestamps, executable names, exit codes, bounded outcome codes, and cleanup status. It does not contain full task instructions, source files, patches, full model conversations, environment values, or unbounded command output.
 
-- Run identifier, task identifier, task digest, and resolved repository commit.
-- State transitions and timestamps.
-- The two host-asserted user confirmations.
-- Validation executable names, argument arrays, exit codes, durations, and truncated output summaries.
-- Changed relative file paths, patch size, patch hash, and result digest.
-- Policy violations and bounded error metadata.
+Command output is held in a bounded in-memory ring buffer. If process recovery requires a temporary spill file, that file remains under the marked session root and is deleted by the same cleanup routine.
 
-It does not record:
+The local MVP sink is a test harness that acknowledges an in-memory or temporary result bundle. Automated tests may enable an explicit developer-only `--retain-until-verified` mode so assertions can inspect the bundle before invoking the same cleanup command. Contributor mode does not enable retention.
 
-- Full Agy conversations or hidden reasoning.
-- Provider credentials, session data, cookies, API keys, or environment values.
-- Source files unrelated to the patch.
-- Home-directory contents or arbitrary machine inventory.
+Federation One will later replace the local test sink. Cleanup must occur only after a sink acknowledgement or after the session's privacy-first retry window expires. If delivery repeatedly fails, the result may remain only inside the marked session root until session expiry, after which it is deleted even if delivery was unsuccessful.
 
-An approved local result bundle contains:
+## Deterministic Cleanup
 
-```text
-result.json
-patch.diff
-validation.json
-audit.jsonl
+Cleanup is ordinary local code and never invokes Agy, Codex, Claude Code, an API, or another model. It works when the contributor has no model quota remaining.
+
+The CLI exposes:
+
+```bash
+genki cleanup --session <session-id>
+genki cleanup --all-expired
 ```
 
-No result is uploaded in the MVP.
+The same cleanup library runs automatically:
+
+- After a result sink acknowledges delivery.
+- After a task fails or is frozen and bounded failure delivery completes.
+- When a session is stopped, expires, or closes normally.
+- On handled `SIGINT` and `SIGTERM` signals.
+- During the next startup to recover from crashes or power loss.
+
+Cleanup deletes only a directory that is under the configured Genki state root, contains a valid Genki ownership marker, has a matching session identifier, and is not a symlink. These checks prevent task-controlled paths from turning cleanup into arbitrary deletion.
+
+Cleanup removes:
+
+- Task JSON copies and transient task payloads.
+- Disposable repository clones and temporary Git metadata.
+- Temporary homes and process output spill files.
+- Patches, validation details, and transient result bundles after delivery acknowledgement.
+- Genki task journals after terminal cleanup state is recorded.
+- The Agy CLI log explicitly redirected into the Genki session root.
+
+Default contributor mode retains no per-task local history after cleanup. The CLI may show an in-memory aggregate count before exit, but it does not persist that count by default.
+
+Cleanup does not edit or delete Agy's global conversation databases, global history, `brain` directories, provider records, terminal history, operating-system logs, backups, or snapshots. The installed Agy CLI exposes `--log-file`, which Genki redirects and cleans, but it does not expose a supported command for removing all other Agy-owned session records. Genki Node will not mutate those stores using undocumented database operations.
 
 ## Error Handling
 
-- Invalid task: return structured validation errors and create no run directory.
-- Dirty or unsupported repository: block inspection with a specific remediation message.
-- First consent denied: create no clone or persistent run record, save no result, and remove the empty launcher session root.
-- Agy cancellation or timeout: mark the run cancelled and remove the clone.
-- Validation command failure: retain the summary for review, classify the run as failed, and prevent successful approval.
-- Runtime, file-count, patch-size, digest, or path violation: freeze the run and prevent approval.
-- MCP process crash: preserve append-only events already flushed; report and clean orphaned state on the next CLI invocation.
-- Second consent denied: delete patch output and the clone, retaining only minimal discard events.
-- Cleanup failure: report the exact retained local path without silently claiming cleanup succeeded.
+- Invalid session policy: return structured errors and create no active session.
+- Session consent denied: remove the empty launcher root and start no task.
+- Invalid, dirty, unsupported, or out-of-policy task: reject it automatically, deliver a bounded outcome code, and continue if session limits permit.
+- Agy cancellation, timeout, session expiry, or user stop: terminate active work, deliver bounded failure metadata when possible, and run cleanup without a model call.
+- Validation failure: deliver a failed result automatically and clean after acknowledgement.
+- Runtime, file-count, patch-size, digest, or path violation: freeze the task, deliver bounded failure metadata, and clean.
+- Result-delivery failure: retry only inside the active session and privacy window; purge at expiry even if delivery never succeeds.
+- MCP crash or power loss: preserve only the minimal journal under the marked session root; recover and clean on next startup.
+- Cleanup failure: report the retained Genki path and retry on next startup without claiming cleanup succeeded.
 
 ## Testing Strategy
 
 ### Unit Tests
 
+- Accept valid session policies and reject invalid duration, task, runtime, executable, and output limits.
+- Require exactly one consent transition before a session becomes active.
+- Reject tasks that exceed the remaining session policy without requesting more consent.
 - Accept valid version-1 tasks and reject malformed or oversized fields.
 - Reject relative repository paths, dirty repositories, submodules, and escaping symlinks.
-- Normalize tasks and produce stable task digests.
-- Enforce valid and invalid run-state transitions.
+- Enforce valid session and task state transitions.
 - Spawn validation commands without a shell and with the environment allowlist.
-- Remove seeded test secrets from child environments, logs, and result serialization.
-- Enforce runtime, changed-file, patch-size, and output-truncation limits.
-- Build deterministic result digests and result bundles.
+- Remove seeded secrets from child environments, journals, result serialization, and cleanup reports.
+- Ensure generic status objects contain no task title, instructions, repository path, patch, or command output.
+- Validate cleanup roots and reject symlink, marker, identifier, and traversal attacks.
+- Run cleanup with the Agy executable unavailable to prove it consumes no model quota.
 
 ### Integration Tests
 
-- Create a temporary Git fixture, inspect a task, prepare a clone, modify the clone, run validation, finalize, approve, and verify the source repository is byte-for-byte and ref-for-ref unchanged.
-- Exercise discard, cancellation, test failure, timeout, policy freeze, digest mismatch, and orphan cleanup.
-- Start the MCP server over `stdio` and exercise all six tools through the MCP client protocol.
-- Confirm that a seeded secret in the parent environment does not appear anywhere under the Genki state directory.
+- Authorize one session, process multiple local tasks, and observe no additional consent calls.
+- Clone temporary Git fixtures, modify only clones, validate, deliver, and verify source repositories remain unchanged.
+- Exercise validation failure, timeout, policy freeze, digest mismatch, delivery retry, session expiry, user stop, and crash recovery.
+- Start the MCP server over `stdio` and exercise all seven tools through an MCP client.
+- Seed distinctive task text and secret values, run cleanup, and confirm neither remains anywhere under the Genki state root.
+- Redirect an Agy-style log into the session root and confirm cleanup removes it without touching files outside that root.
 
 ### Agy Smoke Test
 
-- Validate the plugin with `agy plugin validate`.
-- Install and enable the plugin locally.
-- Launch the test through `genki run --host agy`.
-- Use an intentionally failing fixture test and a bounded coding instruction.
-- Observe both consent gates.
-- Let Agy modify only the disposable clone and make the fixture test pass.
-- Review the generated patch, validation report, and audit ledger.
-- Confirm the original fixture repository is unchanged.
-- Uninstall and reinstall the plugin to verify repeatable packaging.
+- Validate, install, enable, uninstall, and reinstall the Agy plugin.
+- Launch contribution mode through `genki contribute`.
+- Review and accept one session policy.
+- Let a real Agy model complete at least one bounded local fixture task without per-task or result prompts.
+- Observe only generic contributor status in the normal flow.
+- Verify the delivered patch and report through developer-only test-harness retention.
+- Invoke model-free cleanup and confirm the original fixture is unchanged and Genki-controlled task artifacts are gone.
+- Record separately whether the current Agy version creates host-owned conversation artifacts, without claiming Genki removed them.
 
 ## Acceptance Criteria
 
 The MVP is complete when all of the following are true:
 
-- The public repository contains reproducible build, test, lint, and plugin-install instructions.
+- The public repository contains reproducible build, test, lint, plugin-install, session-start, stop, and cleanup instructions.
 - `agy plugin validate` succeeds for the packaged plugin.
-- CLI and Agy natural-language flows use the same MCP server and core implementation.
-- A real Agy model completes the local smoke task and produces a passing patch.
-- Both consent gates are visible and recorded.
-- The source repository and its Git metadata remain unchanged.
-- Patch, validation report, result metadata, and minimum audit ledger are readable and internally consistent.
-- A seeded secret cannot be found in any persisted Genki output.
-- Unit, integration, MCP protocol, and Agy smoke tests pass.
+- CLI and Agy flows use the same MCP server and core implementation.
+- A user authorizes one bounded session and receives no task-level or result-level approval prompts.
+- Normal contributor status reveals no task title, instructions, repository path, patch, or command output.
+- A real Agy model completes a local fixture task and automatically delivers a passing result.
+- Source repositories and their Git metadata remain unchanged.
+- A seeded secret and distinctive task string cannot be found under the Genki state root after cleanup.
+- Cleanup succeeds with no Agy process, provider access, or remaining model quota.
+- Unit, integration, MCP protocol, cleanup, and Agy smoke tests pass.
+- Documentation states that Agy-owned and system-owned records are outside Genki's deletion guarantee.
 - No Federation One, Signal, GitHub, provider-key storage, remote telemetry, Docker, or additional-host behavior is present.
 
 ## Known Security Limitations
 
-The no-Docker choice keeps the first test easy to run but is not a strong sandbox. Agy sandbox mode, a disposable clone, direct command spawning, a clean environment, exact validation commands, and output limits reduce accidental harm; they do not protect against a malicious host process, operating-system compromise, or every possible repository-level exploit. The MCP server controls its own validation subprocesses, but it cannot prevent a compromised host agent from attempting to use other tools exposed by that host.
+The no-Docker choice is not a strong sandbox. Agy sandbox mode, disposable clones, direct command spawning, a clean environment, exact validation commands, limits, and deterministic cleanup reduce accidental harm and local residue; they do not protect against a malicious host process, operating-system compromise, or every repository-level exploit.
 
-The first post-MVP hardening milestone is container-backed execution with explicit filesystem mounts and network policy. Public claims must describe the MVP as controlled local isolation, not secure arbitrary-code execution.
+The MCP server controls its own subprocesses but cannot prevent a compromised host agent from attempting to use other tools exposed by that host. Hiding task content in the UI is a product behavior, not a security boundary.
+
+The first post-MVP hardening milestone is container-backed execution with explicit filesystem mounts and network policy. Public claims must describe the MVP as controlled local isolation with best-effort Genki artifact cleanup, not secure arbitrary-code execution or guaranteed forensic erasure.
 
 ## Future Compatibility
 
-Codex and Claude Code integrations will each provide a host manifest/configuration and workflow skill that map to the same six MCP tools. They must not fork task semantics, policy rules, run states, audit formats, or result formats.
+Codex and Claude Code integrations will each provide a host manifest/configuration and workflow skill that map to the same session and task MCP tools. They must not fork session policy, task semantics, run states, cleanup guarantees, or result formats.
 
-Federation One connectivity will be added behind a separate task-source and result-sink boundary. The local task format remains useful as a test fixture and offline mode. Signal accounting remains outside Genki Node's local execution core and is not part of this MVP.
+Federation One connectivity will be added behind a separate task-source and result-sink boundary. Cleanup will wait for an authenticated delivery acknowledgement, then remove the local task artifacts. Signal accounting remains outside Genki Node's local execution core and is not part of this MVP.
