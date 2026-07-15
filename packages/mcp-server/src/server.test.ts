@@ -84,6 +84,19 @@ describe("Genki MCP server", () => {
     return client;
   }
 
+  async function connectBound() {
+    const engine = fakeEngine();
+    const server = createGenkiMcpServer(engine, { authorizedSessionId: "session-1" });
+    const client = new Client({ name: "genki-test", version: "1.0.0" }, { capabilities: {} });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    closeCallbacks.push(async () => {
+      await client.close();
+      await server.close();
+    });
+    return { client, engine };
+  }
+
   it("lists exactly the seven host-neutral tools", async () => {
     const client = await connect();
     const result = await client.listTools();
@@ -131,5 +144,57 @@ describe("Genki MCP server", () => {
     });
 
     expect(result.isError).toBe(true);
+  });
+
+  it("binds host tools to the consented session", async () => {
+    const { client, engine } = await connectBound();
+    const describe = await client.callTool({
+      name: "genki_describe_session",
+      arguments: {
+        taskDirectory: "/tmp/tasks",
+        policy: {
+          schemaVersion: "1",
+          durationSeconds: 3600,
+          maxTasks: 1,
+          maxTotalRuntimeSeconds: 600,
+          maxTaskRuntimeSeconds: 300,
+          maxChangedFiles: 5,
+          maxPatchBytes: 10000,
+          allowedExecutables: ["node"],
+          host: "agy",
+          model: null,
+          retainUntilVerified: false
+        }
+      }
+    });
+    const otherSession = await client.callTool({
+      name: "genki_session_status",
+      arguments: { sessionId: "session-2" }
+    });
+
+    expect(describe.isError).toBe(true);
+    expect(otherSession.isError).toBe(true);
+    expect(engine.describeSession).not.toHaveBeenCalled();
+    expect(engine.sessionStatus).not.toHaveBeenCalled();
+  });
+
+  it("allows only run IDs prepared by the bound connection", async () => {
+    const { client, engine } = await connectBound();
+    const unknown = await client.callTool({
+      name: "genki_run_validation",
+      arguments: { runId: "run-unknown" }
+    });
+    await client.callTool({
+      name: "genki_prepare_next_task",
+      arguments: { sessionId: "session-1" }
+    });
+    const prepared = await client.callTool({
+      name: "genki_run_validation",
+      arguments: { runId: "run-1" }
+    });
+
+    expect(unknown.isError).toBe(true);
+    expect(prepared.isError).not.toBe(true);
+    expect(engine.runValidation).toHaveBeenCalledOnce();
   });
 });

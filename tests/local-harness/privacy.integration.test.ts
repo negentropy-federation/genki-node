@@ -51,7 +51,7 @@ describe("privacy lifecycle", () => {
       validation: [
         {
           argv: [
-            process.execPath,
+            "node",
             "-e",
             "process.stdout.write(process.env.GENKI_TEST_SECRET ?? 'absent')"
           ],

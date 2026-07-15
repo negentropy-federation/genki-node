@@ -42,7 +42,7 @@ const sessionPolicySchema = z
   });
 
 const validationCommandSchema = z.strictObject({
-  argv: z.tuple([z.string().min(1)], z.string()),
+  argv: z.tuple([executableName], z.string()),
   timeoutSeconds: positiveInteger.max(MAX_SESSION_SECONDS)
 });
 

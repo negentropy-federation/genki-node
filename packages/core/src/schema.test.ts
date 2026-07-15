@@ -68,6 +68,15 @@ describe("parseTaskDefinition", () => {
     ).toThrow();
   });
 
+  it("rejects validation executable paths that bypass the session allowlist", () => {
+    expect(() =>
+      parseTaskDefinition({
+        ...validTask,
+        validation: [{ argv: ["/tmp/fake-node", "--test"], timeoutSeconds: 30 }]
+      })
+    ).toThrow();
+  });
+
   it("rejects oversized instructions and invalid task IDs", () => {
     expect(() => parseTaskDefinition({ ...validTask, id: "not allowed" })).toThrow();
     expect(() => parseTaskDefinition({ ...validTask, instructions: "x".repeat(20_001) })).toThrow();

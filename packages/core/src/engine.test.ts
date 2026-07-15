@@ -63,7 +63,7 @@ function task(id: string, repository: string): TaskDefinition {
     title: `Private title ${id}`,
     repository: { path: repository, baseRef: "HEAD" },
     instructions: `Private instructions ${id}`,
-    validation: [{ argv: [process.execPath, "--test"], timeoutSeconds: 30 }],
+    validation: [{ argv: ["node", "--test"], timeoutSeconds: 30 }],
     policy: { maxRuntimeSeconds: 60, maxChangedFiles: 5, maxPatchBytes: 20_000 }
   };
 }

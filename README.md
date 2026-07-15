@@ -65,7 +65,7 @@ agy plugin list
 }
 ```
 
-Validation commands are argument arrays, never shell command strings. Their executable basenames must be included in the session's `--allow` list.
+Validation commands are argument arrays, never shell command strings. The first argument must be a bare executable name with no path, and that name must be included in the session's `--allow` list.
 
 ## Start a contribution session
 
@@ -117,6 +117,7 @@ Cleanup uses local filesystem code and only removes directories carrying matchin
 
 - Genki does not ask for or persist passwords, cookies, session tokens, OAuth refresh tokens, or provider API keys.
 - Validation receives a small environment allowlist and does not inherit arbitrary parent-process variables.
+- The stdio MCP server requires the authorized session ID, rejects other sessions, and accepts only run IDs prepared by its own connection.
 - Work happens in an independent disposable clone. The source repository is not modified.
 - Task details are hidden by default in contributor-facing output, but they are not secret from the machine owner or from the local host executing the task.
 - Normal cleanup covers Genki-owned session files, disposable workspaces, retained patches, validation output, and the Agy log redirected into the session directory.
