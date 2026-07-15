@@ -124,3 +124,31 @@ export interface ValidationSummary {
   commands: ValidationCommandResult[];
   durationMs: number;
 }
+
+export interface SessionDescription {
+  sessionId: string;
+  policyDigest: string;
+  sessionRoot: string;
+  agyLogPath: string;
+  summary: {
+    durationSeconds: number;
+    maxTasks: number;
+    maxTotalRuntimeSeconds: number;
+    maxTaskRuntimeSeconds: number;
+    allowedExecutables: string[];
+    host: "agy";
+    model: string | null;
+    retainUntilVerified: boolean;
+  };
+}
+
+export interface PreparedTaskForHost {
+  runId: string;
+  workspace: string;
+  instructions: string;
+}
+
+export interface GenericTaskOutcome {
+  code: "DELIVERED" | "POLICY_FROZEN" | "VALIDATION_FAILED";
+  passed: boolean;
+}
