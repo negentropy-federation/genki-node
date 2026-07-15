@@ -7,6 +7,18 @@ export type SessionState =
   | "expired"
   | "revoked";
 
+export type TaskState =
+  | "queued"
+  | "policy_checked"
+  | "prepared"
+  | "executing"
+  | "validating"
+  | "finalizing"
+  | "delivered"
+  | "failed"
+  | "frozen"
+  | "purged";
+
 export interface SessionPolicy {
   schemaVersion: "1";
   durationSeconds: number;
