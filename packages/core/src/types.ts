@@ -94,3 +94,33 @@ export interface TaskRunPaths {
 export interface CleanupReport {
   removedPaths: string[];
 }
+
+export interface RepositoryInspection {
+  sourcePath: string;
+  baseCommit: string;
+}
+
+export interface PatchSummary {
+  patch: string;
+  patchBytes: number;
+  patchDigest: string;
+  changedFiles: string[];
+}
+
+export interface ValidationCommandResult {
+  argv: string[];
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  durationMs: number;
+  timedOut: boolean;
+  stdout: string;
+  stderr: string;
+  stdoutTruncated: boolean;
+  stderrTruncated: boolean;
+}
+
+export interface ValidationSummary {
+  passed: boolean;
+  commands: ValidationCommandResult[];
+  durationMs: number;
+}
