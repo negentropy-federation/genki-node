@@ -96,4 +96,19 @@ describe("cloneRepository and buildPatch", () => {
     expect(await git(repository, "rev-parse", "HEAD")).toBe(sourceHead);
     expect(await git(destination, "rev-parse", "--git-dir")).toBe(".git");
   });
+
+  it("includes newly created files in the patch", async () => {
+    const repository = await createRepository();
+    const destinationParent = await mkdtemp(path.join(os.tmpdir(), "genki-clone-"));
+    const destination = path.join(destinationParent, "workspace");
+    const inspection = await inspectRepository(taskFor(repository));
+
+    await cloneRepository(inspection, destination);
+    await writeFile(path.join(destination, "created.txt"), "new content\n");
+    const patch = await buildPatch(destination);
+
+    expect(patch.changedFiles).toEqual(["created.txt"]);
+    expect(patch.patch).toContain("created.txt");
+    expect(patch.patch).toContain("+new content");
+  });
 });

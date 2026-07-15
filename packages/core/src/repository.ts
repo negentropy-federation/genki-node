@@ -94,6 +94,7 @@ export async function cloneRepository(
 }
 
 export async function buildPatch(workspace: string): Promise<PatchSummary> {
+  await git(workspace, ["add", "--intent-to-add", "--", "."]);
   const patch = await git(workspace, ["diff", "--binary", "--no-ext-diff"]);
   const names = await git(workspace, ["diff", "--name-only", "-z", "--no-ext-diff"]);
   const changedFiles = names.split("\0").filter((name) => name.length > 0);

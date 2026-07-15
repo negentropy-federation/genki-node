@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
 
 import { AgyLaunchError, buildAgyArgs, runAgy } from "./agy.js";
@@ -45,5 +46,24 @@ describe("Agy launch", () => {
         stdio: "ignore"
       })
     ).rejects.toThrow(AgyLaunchError);
+  });
+
+  it("forwards Ctrl-C to Agy and resolves before local cleanup", async () => {
+    const signals = new EventEmitter();
+    const input = {
+      command: process.execPath,
+      args: ["-e", "setTimeout(() => process.exit(0), 200)"],
+      environment: process.env,
+      stdio: "ignore" as const,
+      signalSource: signals
+    } as unknown as Parameters<typeof runAgy>[0];
+    const running = runAgy(input);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    signals.emit("SIGINT");
+
+    await expect(running).resolves.toBe(130);
+    expect(signals.listenerCount("SIGINT")).toBe(0);
+    expect(signals.listenerCount("SIGTERM")).toBe(0);
   });
 });
