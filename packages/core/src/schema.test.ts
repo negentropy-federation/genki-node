@@ -236,8 +236,14 @@ describe("parseLeasedTask", () => {
     "https://github.com/org/repo.git?",
     "https://github.com/org/repo.git#",
     "https://@github.com/org/repo.git",
-    "https://:@github.com/org/repo.git"
-  ])("rejects repository URL components that can carry credentials: %s", (repositoryUrl) => {
+    "https://:@github.com/org/repo.git",
+    " https://@github.com/org/repo.git",
+    "https:////:@github.com/org/repo.git",
+    "https://",
+    "https://github.com\\evil/repo.git",
+    "https://github.com/org/repo.git ",
+    "HTTPS://github.com/org/repo.git"
+  ])("rejects noncanonical repository URL syntax: %s", (repositoryUrl) => {
     expect(() =>
       parseLeasedTask({
         ...leasedTask,
@@ -247,7 +253,7 @@ describe("parseLeasedTask", () => {
   });
 
   it("allows @ in the repository path", () => {
-    const repositoryUrl = "https://github.com/org/repo@v1.git";
+    const repositoryUrl = "https://github.com/org/@scope-repo.git";
 
     expect(
       parseLeasedTask({

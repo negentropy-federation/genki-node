@@ -38,17 +38,20 @@ const executableName = z
   .regex(/^[A-Za-z0-9._+-]+$/u, "Executable names cannot contain shell syntax");
 const repositoryUrl = z
   .string()
-  .url()
+  .regex(
+    /^https:\/\/[^/?#@\\\s]+(?:\/[^?#\\\s]*)?$/u,
+    "Repository URL must use canonical HTTPS syntax without userinfo, query, or fragment"
+  )
+  .pipe(z.string().url())
   .refine((value) => {
     const parsed = new URL(value);
-    const authority = value.slice("https://".length).split(/[/?#]/u, 1)[0] ?? "";
     return (
       !value.includes("?") &&
       !value.includes("#") &&
-      !authority.includes("@") &&
       parsed.protocol === "https:" &&
       parsed.username === "" &&
       parsed.password === "" &&
+      parsed.hostname !== "" &&
       parsed.search === "" &&
       parsed.hash === ""
     );
