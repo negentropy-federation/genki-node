@@ -36,6 +36,19 @@ const executableName = z
   .min(1)
   .max(128)
   .regex(/^[A-Za-z0-9._+-]+$/u, "Executable names cannot contain shell syntax");
+const repositoryUrl = z
+  .string()
+  .url()
+  .refine((value) => {
+    const parsed = new URL(value);
+    return (
+      parsed.protocol === "https:" &&
+      parsed.username === "" &&
+      parsed.password === "" &&
+      parsed.search === "" &&
+      parsed.hash === ""
+    );
+  }, "Repository URL must use HTTPS without userinfo, query, or fragment");
 
 const sessionPolicySchema = z
   .strictObject({
@@ -82,10 +95,8 @@ const leasedTaskSchema = z
     leaseExpiresAt: z.iso.datetime(),
     project: z.strictObject({
       projectId: safeIdentifier,
-      repositoryUrl: z
-        .string()
-        .url()
-        .refine((value) => new URL(value).protocol === "https:", "Repository URL must use HTTPS"),
+      repositoryUrl,
+      visibility: z.literal("public"),
       licenseSpdx: z.enum(ACCEPTED_SPDX_LICENSES),
       baseCommit: gitCommit
     }),
@@ -138,7 +149,12 @@ const partialCheckpointSchema = z.strictObject({
   leaseId: safeIdentifier,
   leaseGeneration: positiveInteger,
   baseCommit: gitCommit,
-  patch: z.string().max(MAX_PATCH_BYTES),
+  patch: z
+    .string()
+    .refine(
+      (value) => Buffer.byteLength(value, "utf8") <= MAX_PATCH_BYTES,
+      `Patch cannot exceed ${MAX_PATCH_BYTES} bytes`
+    ),
   patchDigest: sha256Digest,
   changedFiles: z.array(z.string().min(1)).max(MAX_CHANGED_FILES),
   validation: boundedValidationSummarySchema.nullable(),

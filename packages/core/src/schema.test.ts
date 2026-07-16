@@ -60,6 +60,7 @@ const leasedTask: LeasedTask = {
   project: {
     projectId: "federation-os",
     repositoryUrl: "https://github.com/negentropy-federation/os-lab.git",
+    visibility: "public",
     licenseSpdx: "Apache-2.0",
     baseCommit: "0123456789012345678901234567890123456789"
   },
@@ -190,6 +191,12 @@ describe("parseLeasedTask", () => {
     expect(() =>
       parseLeasedTask({
         ...leasedTask,
+        project: { ...leasedTask.project, visibility: "private" }
+      })
+    ).toThrow();
+    expect(() =>
+      parseLeasedTask({
+        ...leasedTask,
         project: { ...leasedTask.project, repositoryUrl: "http://example.com/repository.git" }
       })
     ).toThrow();
@@ -218,6 +225,19 @@ describe("parseLeasedTask", () => {
       parseLeasedTask({
         ...leasedTask,
         validation: [{ argv: "npm test", timeoutSeconds: 300 }]
+      })
+    ).toThrow();
+  });
+
+  it.each([
+    "https://token@github.com/org/repo.git",
+    "https://github.com/org/repo.git?token=x",
+    "https://github.com/org/repo.git#main"
+  ])("rejects repository URL components that can carry credentials: %s", (repositoryUrl) => {
+    expect(() =>
+      parseLeasedTask({
+        ...leasedTask,
+        project: { ...leasedTask.project, repositoryUrl }
       })
     ).toThrow();
   });
@@ -262,6 +282,15 @@ describe("parseLeasedTask", () => {
 describe("parsePartialCheckpoint", () => {
   it("accepts a provider-neutral checkpoint with bounded validation", () => {
     expect(parsePartialCheckpoint(partialCheckpoint)).toEqual(partialCheckpoint);
+  });
+
+  it("enforces the checkpoint patch limit in UTF-8 bytes", () => {
+    const maxPatchBytes = 5 * 1024 * 1024;
+    const multibytePatch = "界".repeat(Math.floor(maxPatchBytes / 3) + 1);
+
+    expect(multibytePatch.length).toBeLessThan(maxPatchBytes);
+    expect(Buffer.byteLength(multibytePatch, "utf8")).toBeGreaterThan(maxPatchBytes);
+    expect(() => parsePartialCheckpoint({ ...partialCheckpoint, patch: multibytePatch })).toThrow();
   });
 
   it("rejects unbounded or invalid validation summaries", () => {
