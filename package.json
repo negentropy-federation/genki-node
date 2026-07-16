@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
+    "semver": "7.8.5",
     "validator": "13.15.35",
     "zod": "4.4.3"
   },
