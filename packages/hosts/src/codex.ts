@@ -27,6 +27,30 @@ const AVAILABILITY_TIMEOUT_MS = 5_000;
 const SCHEMA_FILENAME = "codex-final-response.schema.json";
 const INHERITED_ENVIRONMENT_NAMES = ["PATH", "LANG", "LC_ALL", "TERM"] as const;
 const GENERIC_OUTPUT_ERROR = "Invalid Codex host output";
+const QUOTA_ERROR_CODES = new Set([
+  "usage_limit_exceeded",
+  "usage_limit_reached",
+  "usage_limit_exhausted",
+  "quota_exceeded",
+  "quota_exhausted",
+  "insufficient_quota",
+  "credits_exhausted",
+  "credits_depleted"
+]);
+const AUTHENTICATION_ERROR_CODES = new Set([
+  "authentication_failed",
+  "authentication_required",
+  "authentication_error",
+  "unauthorized",
+  "invalid_api_key"
+]);
+const CAPACITY_ERROR_CODES = new Set([
+  "server_overloaded",
+  "service_unavailable",
+  "capacity_unavailable",
+  "temporarily_unavailable",
+  "rate_limit_reached"
+]);
 
 const FINAL_RESPONSE_SCHEMA = {
   type: "object",
@@ -69,9 +93,14 @@ interface ParsedCriteria {
   remainingCriteria: string[];
 }
 
+interface DiagnosticRecord {
+  code?: string;
+  message?: string;
+}
+
 interface ScannedCodexRun {
   completedTurn: boolean;
-  diagnostics: string[];
+  diagnostics: DiagnosticRecord[];
   invalidKnownEvent: boolean;
   malformedJsonl: boolean;
   usage: HostUsage | null;
@@ -134,9 +163,59 @@ function parseCriteria(value: unknown): ParsedCriteria | null {
   };
 }
 
+function normalizeDiagnosticCode(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase().replace(/[\s.-]+/gu, "_");
+  return normalized === "" ? null : normalized;
+}
+
+function normalizeDiagnosticMessage(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase().replace(/\s+/gu, " ");
+  return normalized === "" ? null : normalized;
+}
+
+function firstNormalizedDiagnosticCode(candidates: readonly unknown[]): string | null {
+  for (const candidate of candidates) {
+    const normalized = normalizeDiagnosticCode(candidate);
+    if (normalized !== null) {
+      return normalized;
+    }
+  }
+  return null;
+}
+
+function firstNormalizedDiagnosticMessage(candidates: readonly unknown[]): string | null {
+  for (const candidate of candidates) {
+    const normalized = normalizeDiagnosticMessage(candidate);
+    if (normalized !== null) {
+      return normalized;
+    }
+  }
+  return null;
+}
+
+function parseDiagnosticRecord(event: Record<string, unknown>): DiagnosticRecord {
+  const nestedError = isRecord(event.error) ? event.error : null;
+  const code = firstNormalizedDiagnosticCode([
+    event.codex_error_info,
+    event.code,
+    nestedError?.code
+  ]);
+  const message = firstNormalizedDiagnosticMessage([event.message, nestedError?.message]);
+  return {
+    ...(code === null ? {} : { code }),
+    ...(message === null ? {} : { message })
+  };
+}
+
 function scanCodexJsonl(text: string): ScannedCodexRun {
   let completedTurn = false;
-  const diagnostics: string[] = [];
+  const diagnostics: DiagnosticRecord[] = [];
   let invalidKnownEvent = false;
   let malformedJsonl = false;
   let usage: HostUsage | null = null;
@@ -159,7 +238,7 @@ function scanCodexJsonl(text: string): ScannedCodexRun {
     }
 
     if (event.type === "error" || event.type === "turn.failed" || event.type === "turn.aborted") {
-      diagnostics.push(JSON.stringify(event));
+      diagnostics.push(parseDiagnosticRecord(event));
       continue;
     }
 
@@ -257,28 +336,51 @@ function copyInheritedEnvironment(parent: NodeJS.ProcessEnv): NodeJS.ProcessEnv 
   return environment;
 }
 
-function hasQuotaEvidence(record: string): boolean {
-  const normalizedRecord = record.replace(/[_-]+/gu, " ");
-  return /(?:usage\s+limit|quota|credits?)(?:\s+\w+){0,4}\s+(?:deplet(?:ed|ion)|exhaust(?:ed|ion)|reached)|(?:deplet(?:ed|ion)|exhaust(?:ed|ion)|reached)(?:\s+\w+){0,4}\s+(?:usage\s+limit|quota|credits?)|(?:usage\s+limit|quota)\s+exceeded|insufficient\s+quota|hit\s+(?:your\s+)?usage\s+limit|(?:no|zero|0)\s+(?:weighted\s+)?(?:tokens?|credits?)(?:\s+(?:left|remaining))?|(?:no|zero|0)\s+remaining\s+(?:tokens?|credits?|quota)|(?:tokens?|credits?|quota)\s+(?:left|remaining)\s*[:=]?\s*(?:none|zero|0)/iu.test(
-    normalizedRecord
+function hasQuotaEvidence(record: DiagnosticRecord): boolean {
+  if (record.code !== undefined && QUOTA_ERROR_CODES.has(record.code)) {
+    return true;
+  }
+  if (record.message === undefined) {
+    return false;
+  }
+  return /\bhit (?:your )?usage limit\b|\b(?:usage limit|quota|credits?) (?:(?:is|has been) )?(?:exhausted|exceeded|depleted|reached)\b|\binsufficient quota\b|\b(?:no|zero|0) (?:tokens?|credits?) remaining\b|\b(?:no|zero|0) remaining (?:tokens?|credits?)\b|\b(?:tokens?|credits?) remaining(?: is|:| =)? (?:none|no|zero|0)\b/u.test(
+    record.message
   );
 }
 
-function hasAuthenticationEvidence(record: string): boolean {
-  const normalizedRecord = record.replace(/[_-]+/gu, " ");
-  return /authentication\s+(?:failed|failure|required)|not\s+authenticated|unauthorized|invalid\s+(?:api\s+)?key|codex\s+login\s+required|(?:please\s+(?:run\s+)?|run\s+)codex\s+login|\b401\b/iu.test(
-    normalizedRecord
+function hasAuthenticationEvidence(record: DiagnosticRecord): boolean {
+  if (record.code !== undefined && AUTHENTICATION_ERROR_CODES.has(record.code)) {
+    return true;
+  }
+  if (record.message === undefined) {
+    return false;
+  }
+  return /\bauthentication (?:failed|required|error)\b|\bnot authenticated\b|\bunauthorized\b|\binvalid api key\b|\b401\b|\b(?:please(?: run)?|run) codex login\b/u.test(
+    record.message
   );
 }
 
-function hasCapacityEvidence(record: string): boolean {
-  return /temporar(?:y|ily)\s+unavailable|service\s+unavailable|overloaded|capacity|try\s+again\s+later|\b429\b/iu.test(
-    record
+function hasCapacityEvidence(record: DiagnosticRecord): boolean {
+  if (record.code !== undefined && CAPACITY_ERROR_CODES.has(record.code)) {
+    return true;
+  }
+  if (record.message === undefined) {
+    return false;
+  }
+  return /\b(?:service|server)(?: is)? temporarily unavailable\b|\bservice(?: is)? unavailable\b|\bserver(?: is)? overloaded\b|\bcapacity(?: is)? unavailable\b|\bat capacity\b|\btry again later\b|\b429\b/u.test(
+    record.message
   );
 }
 
-function stderrDiagnosticRecords(stderr: string): string[] {
-  return stderr.split(/\r?\n/u).filter((line) => line.trim() !== "");
+function stderrDiagnosticRecords(stderr: string): DiagnosticRecord[] {
+  const records: DiagnosticRecord[] = [];
+  for (const line of stderr.split(/\r?\n/u)) {
+    const message = normalizeDiagnosticMessage(line);
+    if (message !== null) {
+      records.push({ message });
+    }
+  }
+  return records;
 }
 
 function failureResult(
@@ -298,7 +400,7 @@ function failureResult(
 function classifyResult(
   processResult: HostProcessResult,
   parsed: ParsedCodexRun | null,
-  diagnostics: readonly string[]
+  diagnostics: readonly DiagnosticRecord[]
 ): HostRunResult {
   if (processResult.aborted) {
     return failureResult("interrupted", processResult.exitCode);
@@ -446,11 +548,12 @@ export class CodexHostAdapter implements HostAdapter {
   }
 
   async runTask(input: HostRunInput): Promise<HostRunResult> {
-    const schemaPath = await prepareSchema(input.temporaryHome);
+    const temporaryHome = path.resolve(input.temporaryHome);
+    const schemaPath = await prepareSchema(temporaryHome);
 
     const environment = copyInheritedEnvironment(this.parentEnvironment);
-    environment.HOME = input.temporaryHome;
-    environment.TMPDIR = input.temporaryHome;
+    environment.HOME = temporaryHome;
+    environment.TMPDIR = temporaryHome;
     environment.CODEX_HOME = this.nativeCodexHome;
     environment.GENKI_SESSION_ID = input.sessionId;
     environment.GENKI_TASK_ID = input.taskId;
@@ -475,7 +578,7 @@ export class CodexHostAdapter implements HostAdapter {
       return failureResult("host_failed", null);
     }
 
-    let diagnostics: string[] = [];
+    let diagnostics: DiagnosticRecord[] = [];
     let parsed: ParsedCodexRun | null = null;
     try {
       const scanned = scanCodexJsonl(processResult.stdout);

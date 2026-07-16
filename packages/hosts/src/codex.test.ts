@@ -426,6 +426,26 @@ describe("CodexHostAdapter", () => {
     ).rejects.toThrow(/^Failed to prepare Codex task$/u);
   });
 
+  it("rejects a symlinked temporary home with a trailing separator without touching its target", async () => {
+    const run = await createRun("symlinked-home-trailing-separator");
+    const redirectedHome = path.join(testRoot, "redirected-home-trailing-separator");
+    const sentinelPath = path.join(redirectedHome, "outside-sentinel.txt");
+    await rm(run.home, { recursive: true });
+    await mkdir(redirectedHome);
+    await writeFile(sentinelPath, "outside sentinel");
+    await symlink(redirectedHome, run.home);
+
+    await expect(
+      run.adapter.runTask({
+        ...run.input,
+        temporaryHome: `${run.home}${path.sep}`
+      })
+    ).rejects.toThrow(/^Failed to prepare Codex task$/u);
+
+    expect(await readFile(sentinelPath, "utf8")).toBe("outside sentinel");
+    expect(await readdir(redirectedHome)).toEqual(["outside-sentinel.txt"]);
+  });
+
   it("rejects non-directory temporary homes and parents with a generic error", async () => {
     const homeRun = await createRun("file-home");
     await rm(homeRun.home, { recursive: true });
@@ -487,6 +507,56 @@ describe("CodexHostAdapter", () => {
 
     expect(result.outcome).toBe("completed");
     expect(result.completedCriteria).toEqual(["Documented codex login behavior"]);
+  });
+
+  it.each([
+    ["usage limit metadata retries exhausted", "usage-limit-metadata-retries-exhausted"],
+    ["invalid key in configuration", "invalid-key-configuration"],
+    ["two capacity planning status records", "capacity-planning-status"]
+  ])("does not classify %s as a known host outcome", async (_description, mode) => {
+    const { adapter, input } = await createRun(`diagnostic-negative-${mode}`, mode);
+
+    const result = await adapter.runTask(input);
+
+    expect(result).toEqual({
+      host: "codex",
+      outcome: "host_failed",
+      exitCode: 1,
+      usage: null,
+      completedCriteria: [],
+      remainingCriteria: []
+    });
+  });
+
+  it("maps a structured authentication_error code without returning diagnostics", async () => {
+    const { adapter, input } = await createRun(
+      "structured-authentication-error",
+      "authentication-error-code"
+    );
+
+    const result = await adapter.runTask(input);
+
+    expect(result).toEqual({
+      host: "codex",
+      outcome: "authentication_failed",
+      exitCode: 1,
+      usage: null,
+      completedCriteria: [],
+      remainingCriteria: []
+    });
+    expect(JSON.stringify(result)).not.toContain("authentication_error");
+  });
+
+  it("ignores unrecognized fields in structured diagnostic events", async () => {
+    const { adapter, input } = await createRun(
+      "diagnostic-unrecognized-fields",
+      "quota-code-in-unrecognized-metadata"
+    );
+
+    const result = await adapter.runTask(input);
+
+    expect(result.outcome).toBe("host_failed");
+    expect(JSON.stringify(result)).not.toContain("quota_exhausted");
   });
 
   it("maps explicit host failures without returning captured output", async () => {

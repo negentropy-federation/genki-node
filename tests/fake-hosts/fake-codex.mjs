@@ -149,6 +149,12 @@ switch (mode) {
     process.stderr.write("Failed to fetch usage limit metadata\n");
     process.exitCode = 1;
     break;
+  case "usage-limit-metadata-retries-exhausted":
+    writeEvents([
+      { type: "error", message: "usage limit metadata retries exhausted" }
+    ]);
+    process.exitCode = 1;
+    break;
   case "credits-exhausted":
     writeEvents([]);
     process.stderr.write("Credits exhausted for this account\n");
@@ -156,6 +162,16 @@ switch (mode) {
     break;
   case "quota-code-exhausted":
     writeEvents([{ type: "error", codex_error_info: "quota_exhausted" }]);
+    process.exitCode = 1;
+    break;
+  case "quota-code-in-unrecognized-metadata":
+    writeEvents([
+      {
+        type: "error",
+        message: "Ordinary host failure",
+        metadata: { code: "quota_exhausted" }
+      }
+    ]);
     process.exitCode = 1;
     break;
   case "usage-limit-exceeded-code":
@@ -185,6 +201,14 @@ switch (mode) {
     process.stderr.write("Codex login documentation was refreshed\n");
     process.exitCode = 1;
     break;
+  case "authentication-error-code":
+    writeEvents([{ type: "error", codex_error_info: "authentication_error" }]);
+    process.exitCode = 1;
+    break;
+  case "invalid-key-configuration":
+    writeEvents([{ type: "turn.failed", error: { message: "invalid key in configuration" } }]);
+    process.exitCode = 1;
+    break;
   case "capacity-once":
     writeEvents([]);
     process.stderr.write("Service temporarily unavailable\n");
@@ -205,6 +229,13 @@ switch (mode) {
   case "capacity-phrases-one-record":
     writeEvents([]);
     process.stderr.write("Service temporarily unavailable; overloaded; try again later\n");
+    process.exitCode = 1;
+    break;
+  case "capacity-planning-status":
+    writeEvents([
+      { type: "error", message: "capacity planning status" },
+      { type: "turn.failed", error: { message: "capacity planning status" } }
+    ]);
     process.exitCode = 1;
     break;
   case "malformed":
