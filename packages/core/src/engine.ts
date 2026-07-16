@@ -248,6 +248,7 @@ export class GenkiEngine {
       located.record.state = transitionTask(located.record.state, "failed");
       outcome = { code: "VALIDATION_FAILED", passed: false };
     } else {
+      located.record.state = transitionTask(located.record.state, "uploading_result");
       located.record.state = transitionTask(located.record.state, "delivered");
       outcome = { code: "DELIVERED", passed: true };
     }

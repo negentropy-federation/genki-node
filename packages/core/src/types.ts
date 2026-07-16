@@ -12,12 +12,53 @@ export type TaskState =
   | "policy_checked"
   | "prepared"
   | "executing"
+  | "checkpointing"
+  | "uploading_checkpoint"
+  | "checkpointed"
   | "validating"
   | "finalizing"
+  | "uploading_result"
   | "delivered"
   | "failed"
   | "frozen"
   | "purged";
+
+export type HostName = "agy" | "codex";
+
+export type HostOutcomeCode =
+  | "completed"
+  | "quota_exhausted"
+  | "capacity_unavailable"
+  | "authentication_failed"
+  | "host_failed"
+  | "interrupted"
+  | "timed_out";
+
+export interface HostUsage {
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+}
+
+export const ACCEPTED_SPDX_LICENSES = [
+  "Apache-2.0",
+  "MIT",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "MPL-2.0",
+  "GPL-2.0-only",
+  "GPL-2.0-or-later",
+  "GPL-3.0-only",
+  "GPL-3.0-or-later",
+  "LGPL-2.1-only",
+  "LGPL-2.1-or-later",
+  "LGPL-3.0-only",
+  "LGPL-3.0-or-later"
+] as const;
+
+export type AcceptedSpdxLicense = (typeof ACCEPTED_SPDX_LICENSES)[number];
 
 export interface SessionPolicy {
   schemaVersion: "1";
@@ -28,7 +69,7 @@ export interface SessionPolicy {
   maxChangedFiles: number;
   maxPatchBytes: number;
   allowedExecutables: string[];
-  host: "agy";
+  host: HostName;
   model: string | null;
   retainUntilVerified: boolean;
 }
@@ -53,6 +94,74 @@ export interface TaskDefinition {
     maxChangedFiles: number;
     maxPatchBytes: number;
   };
+}
+
+export interface CheckpointReference {
+  checkpointId: string;
+  baseCommit: string;
+  patchDigest: string;
+}
+
+export interface LeasedTaskProject {
+  projectId: string;
+  repositoryUrl: string;
+  licenseSpdx: AcceptedSpdxLicense;
+  baseCommit: string;
+}
+
+export interface LeasedTaskPolicy {
+  maxRuntimeSeconds: number;
+  maxChangedFiles: number;
+  maxPatchBytes: number;
+  executionNetwork: "none";
+  dependencyDomains: string[];
+}
+
+export interface LeasedTask {
+  schemaVersion: "2";
+  taskId: string;
+  revision: number;
+  leaseId: string;
+  leaseGeneration: number;
+  leaseExpiresAt: string;
+  project: LeasedTaskProject;
+  goal: string;
+  acceptanceCriteria: string[];
+  validation: ValidationCommand[];
+  policy: LeasedTaskPolicy;
+  predecessorCheckpoint: CheckpointReference | null;
+}
+
+export interface BoundedValidationCommandSummary {
+  executable: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  durationMs: number;
+}
+
+export interface BoundedValidationSummary {
+  passed: boolean;
+  commands: BoundedValidationCommandSummary[];
+  durationMs: number;
+}
+
+export interface PartialCheckpoint {
+  schemaVersion: "1";
+  taskId: string;
+  taskRevision: number;
+  attemptId: string;
+  leaseId: string;
+  leaseGeneration: number;
+  baseCommit: string;
+  patch: string;
+  patchDigest: string;
+  changedFiles: string[];
+  validation: BoundedValidationSummary | null;
+  host: HostName;
+  hostOutcome: HostOutcomeCode;
+  completedCriteria: string[];
+  remainingCriteria: string[];
+  createdAt: string;
 }
 
 export interface GenericSessionStatus {
@@ -136,7 +245,7 @@ export interface SessionDescription {
     maxTotalRuntimeSeconds: number;
     maxTaskRuntimeSeconds: number;
     allowedExecutables: string[];
-    host: "agy";
+    host: HostName;
     model: string | null;
     retainUntilVerified: boolean;
   };

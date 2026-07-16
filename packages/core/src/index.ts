@@ -1,4 +1,10 @@
-export { parseSessionPolicy, parseTaskDefinition } from "./schema.js";
+export {
+  parseLeasedTask,
+  parsePartialCheckpoint,
+  parseSessionPolicy,
+  parseTaskDefinition
+} from "./schema.js";
+export { ACCEPTED_SPDX_LICENSES } from "./types.js";
 export { canonicalJson, sha256Digest } from "./digest.js";
 export { buildChildEnvironment } from "./environment.js";
 export { GenkiEngine } from "./engine.js";
@@ -27,11 +33,22 @@ export {
   writeJsonAtomic
 } from "./storage.js";
 export type {
+  AcceptedSpdxLicense,
+  BoundedValidationCommandSummary,
+  BoundedValidationSummary,
+  CheckpointReference,
   CleanupReport,
   GenericSessionStatus,
   GenericTaskOutcome,
+  HostName,
+  HostOutcomeCode,
+  HostUsage,
+  LeasedTask,
+  LeasedTaskPolicy,
+  LeasedTaskProject,
   OwnershipMarker,
   PatchSummary,
+  PartialCheckpoint,
   PreparedTaskForHost,
   RepositoryInspection,
   SessionDescription,

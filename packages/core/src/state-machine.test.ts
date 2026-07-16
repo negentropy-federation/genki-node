@@ -31,6 +31,7 @@ describe("transitionTask", () => {
       "executing",
       "validating",
       "finalizing",
+      "uploading_result",
       "delivered",
       "purged"
     ] as const;
@@ -49,10 +50,33 @@ describe("transitionTask", () => {
     expect(transitionTask("frozen", "purged")).toBe("purged");
   });
 
+  it("allows checkpoint upload followed by purge", () => {
+    expect(transitionTask("executing", "checkpointing")).toBe("checkpointing");
+    expect(transitionTask("checkpointing", "uploading_checkpoint")).toBe(
+      "uploading_checkpoint"
+    );
+    expect(transitionTask("uploading_checkpoint", "checkpointed")).toBe("checkpointed");
+    expect(transitionTask("checkpointed", "purged")).toBe("purged");
+  });
+
+  it.each([
+    ["checkpointing", "failed"],
+    ["checkpointing", "frozen"],
+    ["uploading_checkpoint", "failed"],
+    ["uploading_result", "failed"]
+  ] as const)("allows recovery transition %s -> %s", (from, to) => {
+    expect(transitionTask(from, to)).toBe(to);
+  });
+
   it.each([
     ["queued", "executing"],
     ["purged", "prepared"],
-    ["delivered", "executing"]
+    ["delivered", "executing"],
+    ["finalizing", "delivered"],
+    ["checkpointing", "checkpointed"],
+    ["uploading_checkpoint", "frozen"],
+    ["uploading_result", "frozen"],
+    ["checkpointed", "executing"]
   ] as const)("rejects %s -> %s", (from, to) => {
     expect(() => transitionTask(from, to)).toThrow(InvalidTransitionError);
   });

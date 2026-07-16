@@ -79,9 +79,10 @@ function parseContribute(argv: string[]): CliCommand {
         taskDirectory = path.resolve(value);
         break;
       case "--host":
-        if (value !== "agy") {
-          throw new CliUsageError("The MVP supports only --host agy");
+        if (value !== "agy" && value !== "codex") {
+          throw new CliUsageError("--host must be agy or codex");
         }
+        policy.host = value;
         break;
       case "--duration":
         policy.durationSeconds = parseDuration(value, "duration");

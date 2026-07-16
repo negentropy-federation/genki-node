@@ -59,6 +59,21 @@ describe("parseCliArgs", () => {
     });
   });
 
+  it.each(["agy", "codex"] as const)("parses --host %s", (host) => {
+    expect(
+      parseCliArgs(["contribute", "--task-dir", "/tmp/tasks", "--host", host])
+    ).toMatchObject({
+      command: "contribute",
+      policy: { host }
+    });
+  });
+
+  it("rejects unknown hosts", () => {
+    expect(() =>
+      parseCliArgs(["contribute", "--task-dir", "/tmp/tasks", "--host", "claude"])
+    ).toThrowError(/--host must be agy or codex/iu);
+  });
+
   it.each([
     [["contribute"], "--task-dir"],
     [["contribute", "--task-dir", "/tmp/tasks", "--duration", "forever"], "duration"],
