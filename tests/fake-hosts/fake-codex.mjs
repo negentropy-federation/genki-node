@@ -20,8 +20,16 @@ if (args.length === 1 && args[0] === "--version") {
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
-  process.stdout.write(`${version}\n`);
-  process.exit(0);
+  if (version === "hang-ignore-term") {
+    process.removeAllListeners("SIGTERM");
+    process.on("SIGTERM", () => undefined);
+    setTimeout(() => process.exit(124), 300);
+    setInterval(() => undefined, 1_000);
+    await new Promise(() => undefined);
+  } else {
+    process.stdout.write(`${version}\n`);
+    process.exit(0);
+  }
 }
 
 const workspaceIndex = args.indexOf("-C");
@@ -136,9 +144,45 @@ switch (mode) {
     process.stderr.write("Quota information is unavailable\n");
     process.exitCode = 1;
     break;
+  case "usage-metadata-failed":
+    writeEvents([]);
+    process.stderr.write("Failed to fetch usage limit metadata\n");
+    process.exitCode = 1;
+    break;
+  case "credits-exhausted":
+    writeEvents([]);
+    process.stderr.write("Credits exhausted for this account\n");
+    process.exitCode = 1;
+    break;
+  case "quota-code-exhausted":
+    writeEvents([{ type: "error", codex_error_info: "quota_exhausted" }]);
+    process.exitCode = 1;
+    break;
+  case "usage-limit-exceeded-code":
+    writeEvents([{ type: "error", codex_error_info: "usage_limit_exceeded" }]);
+    process.exitCode = 1;
+    break;
+  case "insufficient-quota-code":
+    writeEvents([{ type: "error", code: "insufficient_quota" }]);
+    process.exitCode = 1;
+    break;
+  case "quota-exceeded-code":
+    writeEvents([{ type: "turn.failed", error: { code: "quota_exceeded" } }]);
+    process.exitCode = 1;
+    break;
+  case "hit-usage-limit":
+    writeEvents([]);
+    process.stderr.write("You have hit your usage limit\n");
+    process.exitCode = 1;
+    break;
   case "authentication":
     writeEvents([]);
     process.stderr.write("Authentication failed; please run codex login\n");
+    process.exitCode = 1;
+    break;
+  case "authentication-incidental-login":
+    writeEvents([]);
+    process.stderr.write("Codex login documentation was refreshed\n");
     process.exitCode = 1;
     break;
   case "capacity-once":
@@ -149,6 +193,18 @@ switch (mode) {
   case "capacity-repeated":
     writeEvents([]);
     process.stderr.write("Service temporarily unavailable\nService temporarily unavailable\n");
+    process.exitCode = 1;
+    break;
+  case "capacity-distinct-events":
+    writeEvents([
+      { type: "error", message: "Service temporarily unavailable" },
+      { type: "turn.failed", error: { message: "Try again later" } }
+    ]);
+    process.exitCode = 1;
+    break;
+  case "capacity-phrases-one-record":
+    writeEvents([]);
+    process.stderr.write("Service temporarily unavailable; overloaded; try again later\n");
     process.exitCode = 1;
     break;
   case "malformed":

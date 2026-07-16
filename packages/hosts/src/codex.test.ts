@@ -1,5 +1,16 @@
 import { createHash } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  writeFile
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +28,7 @@ import type { HostRunInput } from "./types.js";
 const fakeCodexPath = fileURLToPath(
   new URL("../../../tests/fake-hosts/fake-codex.mjs", import.meta.url)
 );
+const schemaFilename = "codex-final-response.schema.json";
 
 const finalSchema = {
   type: "object",
@@ -107,6 +119,21 @@ async function createRun(
 async function readCallRecords(home: string): Promise<Array<Record<string, unknown>>> {
   const text = await readFile(path.join(home, "fake-codex-calls.json"), "utf8");
   return JSON.parse(text) as Array<Record<string, unknown>>;
+}
+
+async function readOwnedTaskFiles(directory: string): Promise<Map<string, string>> {
+  const files = new Map<string, string>();
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      for (const [nestedPath, text] of await readOwnedTaskFiles(entryPath)) {
+        files.set(nestedPath, text);
+      }
+    } else if (entry.isFile()) {
+      files.set(entryPath, await readFile(entryPath, "utf8"));
+    }
+  }
+  return files;
 }
 
 describe("buildCodexArgs", () => {
@@ -219,11 +246,56 @@ describe("parseCodexJsonl", () => {
     expect(() => parseCodexJsonl(invalidUsage)).toThrow(/^Invalid Codex host output$/u);
     expect(() => parseCodexJsonl(tooManyCriteria)).toThrow(/^Invalid Codex host output$/u);
   });
+
+  it("uses a later valid agent message after an earlier nonconforming message", () => {
+    const lines = jsonl.split("\n");
+    lines.splice(
+      3,
+      0,
+      JSON.stringify({
+        type: "item.completed",
+        item: { type: "agent_message", text: "not-json" }
+      })
+    );
+
+    expect(parseCodexJsonl(lines.join("\n")).completedCriteria).toEqual([
+      "first criterion"
+    ]);
+  });
+
+  it("fails closed when the last agent message is nonconforming", () => {
+    const lines = jsonl.split("\n");
+    lines.splice(
+      -1,
+      0,
+      JSON.stringify({
+        type: "item.completed",
+        item: { type: "agent_message", text: "not-json" }
+      })
+    );
+
+    expect(() => parseCodexJsonl(lines.join("\n"))).toThrow(
+      /^Invalid Codex host output$/u
+    );
+  });
 });
 
 describe("CodexHostAdapter", () => {
-  it("writes the exact private schema and sends instructions only through stdin", async () => {
-    const { adapter, home, input } = await createRun("successful-run");
+  it("writes the exact private schema and keeps complex instructions out of argv and task files", async () => {
+    const rawInstructionFragments = [
+      "INSTRUCTION_QUOTED_SENTINEL",
+      "INSTRUCTION_ESCAPED_SENTINEL",
+      "INSTRUCTION_MULTILINE_SENTINEL"
+    ];
+    const instructions = [
+      'Preserve "INSTRUCTION_QUOTED_SENTINEL" exactly.',
+      String.raw`Keep \\INSTRUCTION_ESCAPED_SENTINEL\\ escaped.`,
+      "First multiline instruction.",
+      "INSTRUCTION_MULTILINE_SENTINEL on the next line."
+    ].join("\n");
+    const { adapter, home, input } = await createRun("successful-run", "success", {
+      instructions
+    });
 
     const result = await adapter.runTask(input);
     const [record] = await readCallRecords(home);
@@ -248,7 +320,12 @@ describe("CodexHostAdapter", () => {
       remainingCriteria: ["criterion remaining"]
     });
     expect(argv).toEqual(buildCodexArgs({ workspace: input.workspace, schemaPath, model: null }));
-    expect(argv).not.toContain(input.instructions);
+    for (const argument of argv) {
+      for (const fragment of rawInstructionFragments) {
+        expect(argument).not.toBe(fragment);
+        expect(argument).not.toContain(fragment);
+      }
+    }
     expect(JSON.stringify(record)).not.toContain(input.instructions);
     expect(record?.stdinSha256).toBe(
       createHash("sha256").update(input.instructions).digest("hex")
@@ -287,6 +364,100 @@ describe("CodexHostAdapter", () => {
       )
     ).toEqual([]);
     expect(JSON.stringify(environment)).not.toContain("must-not-leak");
+
+    const forbiddenFileSentinels = [
+      ...rawInstructionFragments,
+      JSON.stringify(input.instructions).slice(1, -1),
+      "thread-local-only",
+      '\\"thread-local-only\\"',
+      "criterion complete",
+      '\\"criterion complete\\"',
+      "criterion remaining"
+    ];
+    const ownedFiles = await readOwnedTaskFiles(home);
+    expect([...ownedFiles.keys()].sort()).toEqual(
+      [path.join(home, schemaFilename), path.join(home, "fake-codex-calls.json")].sort()
+    );
+    for (const text of ownedFiles.values()) {
+      for (const sentinel of forbiddenFileSentinels) {
+        expect(text).not.toContain(sentinel);
+      }
+    }
+  });
+
+  it("replaces a destination schema symlink without touching its target", async () => {
+    const { adapter, home, input } = await createRun("schema-destination-symlink");
+    const outsideTarget = path.join(testRoot, "schema-outside-target.txt");
+    const schemaPath = path.join(home, schemaFilename);
+    await writeFile(outsideTarget, "outside sentinel", { mode: 0o640 });
+    await symlink(outsideTarget, schemaPath);
+
+    const result = await adapter.runTask(input);
+
+    expect(result.outcome).toBe("completed");
+    expect(await readFile(outsideTarget, "utf8")).toBe("outside sentinel");
+    expect((await lstat(schemaPath)).isSymbolicLink()).toBe(false);
+    expect(JSON.parse(await readFile(schemaPath, "utf8"))).toEqual(finalSchema);
+    expect((await stat(schemaPath)).mode & 0o777).toBe(0o600);
+  });
+
+  it("rejects symlinked temporary homes and parents with a generic error", async () => {
+    const homeRun = await createRun("symlinked-home");
+    const redirectedHome = path.join(testRoot, "redirected-home");
+    await rm(homeRun.home, { recursive: true });
+    await mkdir(redirectedHome);
+    await symlink(redirectedHome, homeRun.home);
+
+    await expect(homeRun.adapter.runTask(homeRun.input)).rejects.toThrow(
+      /^Failed to prepare Codex task$/u
+    );
+
+    const parentRun = await createRun("symlinked-parent");
+    const actualParent = path.join(testRoot, "actual-temporary-parent");
+    const linkedParent = path.join(testRoot, "linked-temporary-parent");
+    await mkdir(path.join(actualParent, "home"), { recursive: true });
+    await symlink(actualParent, linkedParent);
+
+    await expect(
+      parentRun.adapter.runTask({
+        ...parentRun.input,
+        temporaryHome: path.join(linkedParent, "home")
+      })
+    ).rejects.toThrow(/^Failed to prepare Codex task$/u);
+  });
+
+  it("rejects non-directory temporary homes and parents with a generic error", async () => {
+    const homeRun = await createRun("file-home");
+    await rm(homeRun.home, { recursive: true });
+    await writeFile(homeRun.home, "not a directory");
+
+    await expect(homeRun.adapter.runTask(homeRun.input)).rejects.toThrow(
+      /^Failed to prepare Codex task$/u
+    );
+
+    const parentRun = await createRun("file-parent");
+    const fileParent = path.join(testRoot, "temporary-parent-file");
+    await writeFile(fileParent, "not a directory");
+
+    await expect(
+      parentRun.adapter.runTask({
+        ...parentRun.input,
+        temporaryHome: path.join(fileParent, "home")
+      })
+    ).rejects.toThrow(/^Failed to prepare Codex task$/u);
+  });
+
+  it("removes the private schema temporary file when preparation fails", async () => {
+    const { adapter, home, input } = await createRun("schema-cleanup");
+    await mkdir(path.join(home, schemaFilename));
+
+    await expect(adapter.runTask(input)).rejects.toThrow(/^Failed to prepare Codex task$/u);
+
+    expect(
+      (await readdir(home)).filter((name) =>
+        name.startsWith(`.${schemaFilename}.temporary-`)
+      )
+    ).toEqual([]);
   });
 
   it("respects an explicit native CODEX_HOME", async () => {
@@ -323,8 +494,18 @@ describe("CodexHostAdapter", () => {
       ["quota", "quota_exhausted"],
       ["quota-malformed", "quota_exhausted"],
       ["bare-quota", "host_failed"],
+      ["usage-metadata-failed", "host_failed"],
+      ["credits-exhausted", "quota_exhausted"],
+      ["quota-code-exhausted", "quota_exhausted"],
+      ["usage-limit-exceeded-code", "quota_exhausted"],
+      ["insufficient-quota-code", "quota_exhausted"],
+      ["quota-exceeded-code", "quota_exhausted"],
+      ["hit-usage-limit", "quota_exhausted"],
       ["authentication", "authentication_failed"],
+      ["authentication-incidental-login", "host_failed"],
       ["capacity-repeated", "capacity_unavailable"],
+      ["capacity-distinct-events", "capacity_unavailable"],
+      ["capacity-phrases-one-record", "host_failed"],
       ["capacity-once", "host_failed"],
       ["host-failed", "host_failed"],
       ["malformed", "host_failed"],
@@ -338,10 +519,10 @@ describe("CodexHostAdapter", () => {
       const { adapter, input } = await createRun(`failure-${mode}`, mode);
       const result = await adapter.runTask(input);
 
-      expect(result).toEqual({
+      expect(result, mode).toEqual({
         host: "codex",
         outcome,
-        exitCode: mode.startsWith("capacity") || ["quota", "quota-malformed", "bare-quota", "authentication", "malformed"].includes(mode)
+        exitCode: mode.startsWith("capacity") || ["quota", "quota-malformed", "bare-quota", "usage-metadata-failed", "credits-exhausted", "quota-code-exhausted", "usage-limit-exceeded-code", "insufficient-quota-code", "quota-exceeded-code", "hit-usage-limit", "authentication", "authentication-incidental-login", "malformed"].includes(mode)
           ? 1
           : mode === "host-failed"
             ? 9
@@ -353,6 +534,26 @@ describe("CodexHostAdapter", () => {
       expect(JSON.stringify(result)).not.toContain("thread-local-only");
       expect(JSON.stringify(result)).not.toContain("temporarily unavailable");
     }
+  });
+
+  it("normalizes generic process-start failures as host_failed", async () => {
+    const run = await createRun("process-start-failure");
+    const adapter = new CodexHostAdapter({
+      command: path.join(testRoot, "missing-codex-command"),
+      parentEnvironment: {
+        PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`,
+        HOME: path.join(testRoot, "process-start-native-home")
+      }
+    });
+
+    await expect(adapter.runTask(run.input)).resolves.toEqual({
+      host: "codex",
+      outcome: "host_failed",
+      exitCode: null,
+      usage: null,
+      completedCriteria: [],
+      remainingCriteria: []
+    });
   });
 
   it("gives abort precedence over timeout and host evidence", async () => {
@@ -406,5 +607,28 @@ describe("CodexHostAdapter", () => {
       version: "0.144.1",
       reason: "unsupported_version"
     });
+  });
+
+  it("finishes a hung availability probe at its injected absolute timeout", async () => {
+    const run = await createRun("availability-hang");
+    const nativeHome = path.join(path.dirname(run.home), "native-home");
+    await writeFile(path.join(nativeHome, "fake-codex-version.txt"), "hang-ignore-term");
+    const options = {
+      command: fakeCodexPath,
+      parentEnvironment: {
+        PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`,
+        HOME: nativeHome
+      },
+      availabilityTimeoutMs: 25
+    };
+    const adapter = new CodexHostAdapter(options);
+    const startedAt = Date.now();
+
+    await expect(adapter.checkAvailability()).resolves.toEqual({
+      available: false,
+      version: null,
+      reason: "probe_failed"
+    });
+    expect(Date.now() - startedAt).toBeLessThan(200);
   });
 });

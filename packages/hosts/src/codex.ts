@@ -1,5 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, rename, unlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -58,6 +59,7 @@ export interface ParsedCodexRun {
 }
 
 interface CodexHostAdapterOptions {
+  availabilityTimeoutMs?: number;
   command?: string;
   parentEnvironment?: NodeJS.ProcessEnv;
 }
@@ -179,7 +181,7 @@ function scanCodexJsonl(text: string): ScannedCodexRun {
       continue;
     }
     if (typeof event.item.text !== "string") {
-      invalidKnownEvent = true;
+      criteria = null;
       continue;
     }
 
@@ -187,15 +189,10 @@ function scanCodexJsonl(text: string): ScannedCodexRun {
     try {
       payload = JSON.parse(event.item.text) as unknown;
     } catch {
-      invalidKnownEvent = true;
+      criteria = null;
       continue;
     }
-    const parsedCriteria = parseCriteria(payload);
-    if (parsedCriteria === null) {
-      invalidKnownEvent = true;
-    } else {
-      criteria = parsedCriteria;
-    }
+    criteria = parseCriteria(payload);
   }
 
   return { completedTurn, diagnostics, invalidKnownEvent, malformedJsonl, usage, criteria };
@@ -260,23 +257,28 @@ function copyInheritedEnvironment(parent: NodeJS.ProcessEnv): NodeJS.ProcessEnv 
   return environment;
 }
 
-function hasQuotaEvidence(text: string): boolean {
-  return /usage[ _-]?limit|quota(?:[ _-]?(?:exceeded|exhausted|reached|depleted)|\s+(?:(?:is|has\s+been)\s+)?(?:exceeded|exhausted|reached|depleted))|(?:exceeded|exhausted|reached|depleted)(?:\s+\w+){0,3}\s+quota|insufficient[ _-]?quota|credits?[ _-]?depleted|(?:no|zero|0)\s+(?:weighted\s+)?tokens?\s+(?:left|remaining)/iu.test(
-    text
+function hasQuotaEvidence(record: string): boolean {
+  const normalizedRecord = record.replace(/[_-]+/gu, " ");
+  return /(?:usage\s+limit|quota|credits?)(?:\s+\w+){0,4}\s+(?:deplet(?:ed|ion)|exhaust(?:ed|ion)|reached)|(?:deplet(?:ed|ion)|exhaust(?:ed|ion)|reached)(?:\s+\w+){0,4}\s+(?:usage\s+limit|quota|credits?)|(?:usage\s+limit|quota)\s+exceeded|insufficient\s+quota|hit\s+(?:your\s+)?usage\s+limit|(?:no|zero|0)\s+(?:weighted\s+)?(?:tokens?|credits?)(?:\s+(?:left|remaining))?|(?:no|zero|0)\s+remaining\s+(?:tokens?|credits?|quota)|(?:tokens?|credits?|quota)\s+(?:left|remaining)\s*[:=]?\s*(?:none|zero|0)/iu.test(
+    normalizedRecord
   );
 }
 
-function hasAuthenticationEvidence(text: string): boolean {
-  return /authentication\s+(?:failed|required)|not\s+authenticated|unauthorized|invalid\s+(?:api[ _-]?)?key|codex\s+login|\b401\b/iu.test(
-    text
+function hasAuthenticationEvidence(record: string): boolean {
+  const normalizedRecord = record.replace(/[_-]+/gu, " ");
+  return /authentication\s+(?:failed|failure|required)|not\s+authenticated|unauthorized|invalid\s+(?:api\s+)?key|codex\s+login\s+required|(?:please\s+(?:run\s+)?|run\s+)codex\s+login|\b401\b/iu.test(
+    normalizedRecord
   );
 }
 
-function hasRepeatedCapacityEvidence(text: string): boolean {
-  const matches = text.match(
-    /temporar(?:y|ily)\s+unavailable|service\s+unavailable|overloaded|capacity|try\s+again\s+later|\b429\b/giu
+function hasCapacityEvidence(record: string): boolean {
+  return /temporar(?:y|ily)\s+unavailable|service\s+unavailable|overloaded|capacity|try\s+again\s+later|\b429\b/iu.test(
+    record
   );
-  return (matches?.length ?? 0) >= 2;
+}
+
+function stderrDiagnosticRecords(stderr: string): string[] {
+  return stderr.split(/\r?\n/u).filter((line) => line.trim() !== "");
 }
 
 function failureResult(
@@ -296,7 +298,7 @@ function failureResult(
 function classifyResult(
   processResult: HostProcessResult,
   parsed: ParsedCodexRun | null,
-  diagnostics: string
+  diagnostics: readonly string[]
 ): HostRunResult {
   if (processResult.aborted) {
     return failureResult("interrupted", processResult.exitCode);
@@ -305,14 +307,14 @@ function classifyResult(
     return failureResult("timed_out", processResult.exitCode);
   }
 
-  const evidence = `${diagnostics}\n${processResult.stderr}`;
-  if (hasQuotaEvidence(evidence)) {
+  const evidenceRecords = [...diagnostics, ...stderrDiagnosticRecords(processResult.stderr)];
+  if (evidenceRecords.some(hasQuotaEvidence)) {
     return failureResult("quota_exhausted", processResult.exitCode);
   }
-  if (hasAuthenticationEvidence(evidence)) {
+  if (evidenceRecords.some(hasAuthenticationEvidence)) {
     return failureResult("authentication_failed", processResult.exitCode);
   }
-  if (hasRepeatedCapacityEvidence(evidence)) {
+  if (evidenceRecords.filter(hasCapacityEvidence).length >= 2) {
     return failureResult("capacity_unavailable", processResult.exitCode);
   }
   if (
@@ -333,15 +335,67 @@ function classifyResult(
   return failureResult("host_failed", processResult.exitCode);
 }
 
+async function validateDirectoryEntry(directory: string): Promise<void> {
+  const entry = await lstat(directory);
+  if (entry.isSymbolicLink() || !entry.isDirectory()) {
+    throw new Error("Invalid directory");
+  }
+}
+
+async function prepareSchema(temporaryHome: string): Promise<string> {
+  const parent = path.dirname(temporaryHome);
+  let temporarySchemaPath: string | null = null;
+  let schemaHandle: Awaited<ReturnType<typeof open>> | null = null;
+
+  try {
+    await validateDirectoryEntry(parent);
+    try {
+      await validateDirectoryEntry(temporaryHome);
+    } catch (error) {
+      if (!isRecord(error) || error.code !== "ENOENT") {
+        throw error;
+      }
+      await mkdir(temporaryHome, { mode: 0o700 });
+      await validateDirectoryEntry(temporaryHome);
+    }
+
+    const schemaPath = path.join(temporaryHome, SCHEMA_FILENAME);
+    temporarySchemaPath = path.join(
+      temporaryHome,
+      `.${SCHEMA_FILENAME}.temporary-${randomUUID()}`
+    );
+    schemaHandle = await open(temporarySchemaPath, "wx", 0o600);
+    await schemaHandle.writeFile(`${JSON.stringify(FINAL_RESPONSE_SCHEMA, null, 2)}\n`, {
+      encoding: "utf8"
+    });
+    await schemaHandle.chmod(0o600);
+    await schemaHandle.close();
+    schemaHandle = null;
+    await rename(temporarySchemaPath, schemaPath);
+    temporarySchemaPath = null;
+    return schemaPath;
+  } catch {
+    if (schemaHandle !== null) {
+      await schemaHandle.close().catch(() => undefined);
+    }
+    if (temporarySchemaPath !== null) {
+      await unlink(temporarySchemaPath).catch(() => undefined);
+    }
+    throw new Error("Failed to prepare Codex task");
+  }
+}
+
 export class CodexHostAdapter implements HostAdapter {
   readonly name = "codex" as const;
 
+  private readonly availabilityTimeoutMs: number;
   private readonly command: string;
   private readonly parentEnvironment: NodeJS.ProcessEnv;
   private readonly nativeHome: string;
   private readonly nativeCodexHome: string;
 
   constructor(options: CodexHostAdapterOptions = {}) {
+    this.availabilityTimeoutMs = options.availabilityTimeoutMs ?? AVAILABILITY_TIMEOUT_MS;
     this.command = options.command ?? "codex";
     this.parentEnvironment = options.parentEnvironment ?? process.env;
     this.nativeHome = this.parentEnvironment.HOME ?? os.homedir();
@@ -362,7 +416,8 @@ export class CodexHostAdapter implements HostAdapter {
         args: ["--version"],
         workingDirectory: process.cwd(),
         environment,
-        timeoutMs: AVAILABILITY_TIMEOUT_MS,
+        timeoutMs: this.availabilityTimeoutMs,
+        terminateGraceMs: 0,
         abortSignal: new AbortController().signal
       });
     } catch {
@@ -391,17 +446,7 @@ export class CodexHostAdapter implements HostAdapter {
   }
 
   async runTask(input: HostRunInput): Promise<HostRunResult> {
-    const schemaPath = path.join(input.temporaryHome, SCHEMA_FILENAME);
-    try {
-      await mkdir(input.temporaryHome, { recursive: true, mode: 0o700 });
-      await writeFile(schemaPath, `${JSON.stringify(FINAL_RESPONSE_SCHEMA, null, 2)}\n`, {
-        encoding: "utf8",
-        mode: 0o600
-      });
-      await chmod(schemaPath, 0o600);
-    } catch {
-      throw new Error("Failed to prepare Codex task");
-    }
+    const schemaPath = await prepareSchema(input.temporaryHome);
 
     const environment = copyInheritedEnvironment(this.parentEnvironment);
     environment.HOME = input.temporaryHome;
@@ -411,25 +456,30 @@ export class CodexHostAdapter implements HostAdapter {
     environment.GENKI_TASK_ID = input.taskId;
     environment.GENKI_ATTEMPT_ID = input.attemptId;
 
-    const processResult = await runHostProcess({
-      command: this.command,
-      args: buildCodexArgs({
-        workspace: input.workspace,
-        schemaPath,
-        model: input.model
-      }),
-      workingDirectory: input.workspace,
-      environment,
-      stdin: input.instructions,
-      timeoutMs: Math.max(0, input.timeoutSeconds * 1_000),
-      abortSignal: input.abortSignal
-    });
+    let processResult: HostProcessResult;
+    try {
+      processResult = await runHostProcess({
+        command: this.command,
+        args: buildCodexArgs({
+          workspace: input.workspace,
+          schemaPath,
+          model: input.model
+        }),
+        workingDirectory: input.workspace,
+        environment,
+        stdin: input.instructions,
+        timeoutMs: Math.max(0, input.timeoutSeconds * 1_000),
+        abortSignal: input.abortSignal
+      });
+    } catch {
+      return failureResult("host_failed", null);
+    }
 
-    let diagnostics = "";
+    let diagnostics: string[] = [];
     let parsed: ParsedCodexRun | null = null;
     try {
       const scanned = scanCodexJsonl(processResult.stdout);
-      diagnostics = scanned.diagnostics.join("\n");
+      diagnostics = scanned.diagnostics;
       parsed = normalizeScannedRun(scanned);
     } catch {
       parsed = null;
