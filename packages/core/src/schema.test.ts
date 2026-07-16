@@ -252,6 +252,19 @@ describe("parseLeasedTask", () => {
     ).toThrow();
   });
 
+  it.each([
+    "https://-github.com/org/repo.git",
+    "https://git_hub.com/org/repo.git",
+    "https://localhost/org/repo.git"
+  ])("rejects invalid repository hostname: %s", (repositoryUrl) => {
+    expect(() =>
+      parseLeasedTask({
+        ...leasedTask,
+        project: { ...leasedTask.project, repositoryUrl }
+      })
+    ).toThrow();
+  });
+
   it("allows @ in the repository path", () => {
     const repositoryUrl = "https://github.com/org/@scope-repo.git";
 

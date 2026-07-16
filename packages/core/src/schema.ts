@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import validator from "validator";
 import { z } from "zod";
 
 import { ACCEPTED_SPDX_LICENSES } from "./types.js";
@@ -38,24 +39,23 @@ const executableName = z
   .regex(/^[A-Za-z0-9._+-]+$/u, "Executable names cannot contain shell syntax");
 const repositoryUrl = z
   .string()
-  .regex(
-    /^https:\/\/[^/?#@\\\s]+(?:\/[^?#\\\s]*)?$/u,
-    "Repository URL must use canonical HTTPS syntax without userinfo, query, or fragment"
-  )
-  .pipe(z.string().url())
-  .refine((value) => {
-    const parsed = new URL(value);
-    return (
-      !value.includes("?") &&
-      !value.includes("#") &&
-      parsed.protocol === "https:" &&
-      parsed.username === "" &&
-      parsed.password === "" &&
-      parsed.hostname !== "" &&
-      parsed.search === "" &&
-      parsed.hash === ""
-    );
-  }, "Repository URL must use HTTPS without userinfo, query, or fragment");
+  .refine(
+    (value) =>
+      value.startsWith("https://") &&
+      validator.isURL(value, {
+        protocols: ["https"],
+        require_protocol: true,
+        require_valid_protocol: true,
+        require_host: true,
+        require_tld: true,
+        allow_protocol_relative_urls: false,
+        allow_fragments: false,
+        allow_query_components: false,
+        disallow_auth: true,
+        allow_underscores: false
+      }),
+    "Repository URL must use HTTPS without userinfo, query, or fragment"
+  );
 
 const sessionPolicySchema = z
   .strictObject({
