@@ -234,7 +234,9 @@ describe("parseLeasedTask", () => {
     "https://github.com/org/repo.git?token=x",
     "https://github.com/org/repo.git#main",
     "https://github.com/org/repo.git?",
-    "https://github.com/org/repo.git#"
+    "https://github.com/org/repo.git#",
+    "https://@github.com/org/repo.git",
+    "https://:@github.com/org/repo.git"
   ])("rejects repository URL components that can carry credentials: %s", (repositoryUrl) => {
     expect(() =>
       parseLeasedTask({
@@ -242,6 +244,17 @@ describe("parseLeasedTask", () => {
         project: { ...leasedTask.project, repositoryUrl }
       })
     ).toThrow();
+  });
+
+  it("allows @ in the repository path", () => {
+    const repositoryUrl = "https://github.com/org/repo@v1.git";
+
+    expect(
+      parseLeasedTask({
+        ...leasedTask,
+        project: { ...leasedTask.project, repositoryUrl }
+      }).project.repositoryUrl
+    ).toBe(repositoryUrl);
   });
 
   it("validates checkpoint references and rejects unknown nested keys", () => {

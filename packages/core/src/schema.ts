@@ -41,9 +41,11 @@ const repositoryUrl = z
   .url()
   .refine((value) => {
     const parsed = new URL(value);
+    const authority = value.slice("https://".length).split(/[/?#]/u, 1)[0] ?? "";
     return (
       !value.includes("?") &&
       !value.includes("#") &&
+      !authority.includes("@") &&
       parsed.protocol === "https:" &&
       parsed.username === "" &&
       parsed.password === "" &&
