@@ -1,7 +1,7 @@
 # Genki Node Local MCP MVP Design
 
 Date: 2026-07-16
-Status: Revised after review; awaiting final written-spec approval
+Status: Implemented and locally verified; next phase defined in `2026-07-16-federation-one-contribution-mvp-design.md`
 
 ## Summary
 
