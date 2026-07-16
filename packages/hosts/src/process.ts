@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { TextDecoder } from "node:util";
 
 import type { HostProcessInput, HostProcessResult } from "./types.js";
 
@@ -7,8 +8,23 @@ const DEFAULT_TERMINATE_GRACE_MS = 2_000;
 
 interface BoundedOutput {
   append(chunk: Buffer): void;
-  text(): string;
-  truncated(): boolean;
+  result(): { text: string; truncated: boolean };
+}
+
+function truncateUtf8(text: string, limitBytes: number): { text: string; truncated: boolean } {
+  let capturedBytes = 0;
+  let capturedCodeUnits = 0;
+
+  for (const character of text) {
+    const characterBytes = Buffer.byteLength(character, "utf8");
+    if (capturedBytes + characterBytes > limitBytes) {
+      return { text: text.slice(0, capturedCodeUnits), truncated: true };
+    }
+    capturedBytes += characterBytes;
+    capturedCodeUnits += character.length;
+  }
+
+  return { text, truncated: false };
 }
 
 function createBoundedOutput(limitBytes: number): BoundedOutput {
@@ -29,11 +45,13 @@ function createBoundedOutput(limitBytes: number): BoundedOutput {
       capturedBytes += capturedChunk.length;
       wasTruncated ||= capturedChunk.length < chunk.length;
     },
-    text() {
-      return Buffer.concat(chunks, capturedBytes).toString("utf8");
-    },
-    truncated() {
-      return wasTruncated;
+    result() {
+      const decoded = new TextDecoder("utf-8").decode(Buffer.concat(chunks, capturedBytes));
+      const bounded = truncateUtf8(decoded, limitBytes);
+      return {
+        text: bounded.text,
+        truncated: wasTruncated || bounded.truncated
+      };
     }
   };
 }
@@ -60,8 +78,7 @@ export async function runHostProcess(input: HostProcessInput): Promise<HostProce
   const stdout = createBoundedOutput(input.stdoutLimitBytes ?? DEFAULT_OUTPUT_LIMIT_BYTES);
   const stderr = createBoundedOutput(input.stderrLimitBytes ?? DEFAULT_OUTPUT_LIMIT_BYTES);
   const terminateGraceMs = input.terminateGraceMs ?? DEFAULT_TERMINATE_GRACE_MS;
-  let timedOut = false;
-  let aborted = false;
+  let terminationCause: "timeout" | "abort" | undefined;
 
   const child = spawnHostProcess(input);
 
@@ -80,13 +97,21 @@ export async function runHostProcess(input: HostProcessInput): Promise<HostProce
         clearTimeout(killTimer);
       }
       input.abortSignal.removeEventListener("abort", onAbort);
+      child.off("error", onError);
       child.stdout.off("data", onStdout);
       child.stderr.off("data", onStderr);
       child.stdin.off("error", onStdinError);
     };
 
-    const requestTermination = () => {
+    const requestTermination = (cause: "timeout" | "abort") => {
+      if (terminationCause === undefined) {
+        if (spawned && !isRunning(child.exitCode, child.signalCode)) {
+          return;
+        }
+        terminationCause = cause;
+      }
       if (
+        terminationCause !== cause ||
         !spawned ||
         terminationRequested ||
         !isRunning(child.exitCode, child.signalCode)
@@ -105,8 +130,15 @@ export async function runHostProcess(input: HostProcessInput): Promise<HostProce
     };
 
     const onAbort = () => {
-      aborted = true;
-      requestTermination();
+      requestTermination("abort");
+    };
+
+    const onError = () => {
+      if (spawned) {
+        return;
+      }
+      cleanup();
+      reject(new Error("Failed to start host process"));
     };
 
     child.stdout.on("data", onStdout);
@@ -115,27 +147,26 @@ export async function runHostProcess(input: HostProcessInput): Promise<HostProce
 
     child.once("spawn", () => {
       spawned = true;
-      if (timedOut || aborted) {
-        requestTermination();
+      if (terminationCause !== undefined) {
+        requestTermination(terminationCause);
       }
     });
 
-    child.once("error", () => {
-      cleanup();
-      reject(new Error("Failed to start host process"));
-    });
+    child.on("error", onError);
 
     child.once("close", (exitCode, signal) => {
       cleanup();
+      const stdoutResult = stdout.result();
+      const stderrResult = stderr.result();
       resolve({
         exitCode,
         signal,
-        stdout: stdout.text(),
-        stderr: stderr.text(),
-        stdoutTruncated: stdout.truncated(),
-        stderrTruncated: stderr.truncated(),
-        timedOut,
-        aborted,
+        stdout: stdoutResult.text,
+        stderr: stderrResult.text,
+        stdoutTruncated: stdoutResult.truncated,
+        stderrTruncated: stderrResult.truncated,
+        timedOut: terminationCause === "timeout",
+        aborted: terminationCause === "abort",
         durationMs: Date.now() - startedAt
       });
     });
@@ -146,8 +177,7 @@ export async function runHostProcess(input: HostProcessInput): Promise<HostProce
     }
 
     const timeoutTimer = setTimeout(() => {
-      timedOut = true;
-      requestTermination();
+      requestTermination("timeout");
     }, input.timeoutMs);
     timeoutTimer.unref();
 
