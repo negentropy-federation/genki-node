@@ -42,6 +42,8 @@ const repositoryUrl = z
   .refine((value) => {
     const parsed = new URL(value);
     return (
+      !value.includes("?") &&
+      !value.includes("#") &&
       parsed.protocol === "https:" &&
       parsed.username === "" &&
       parsed.password === "" &&

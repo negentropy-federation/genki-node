@@ -232,7 +232,9 @@ describe("parseLeasedTask", () => {
   it.each([
     "https://token@github.com/org/repo.git",
     "https://github.com/org/repo.git?token=x",
-    "https://github.com/org/repo.git#main"
+    "https://github.com/org/repo.git#main",
+    "https://github.com/org/repo.git?",
+    "https://github.com/org/repo.git#"
   ])("rejects repository URL components that can carry credentials: %s", (repositoryUrl) => {
     expect(() =>
       parseLeasedTask({
