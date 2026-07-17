@@ -8,8 +8,13 @@ export { ACCEPTED_SPDX_LICENSES } from "./types.js";
 export { canonicalJson, sha256Digest } from "./digest.js";
 export { buildChildEnvironment } from "./environment.js";
 export { GenkiEngine } from "./engine.js";
-export { buildPatch, cloneRepository, inspectRepository } from "./repository.js";
-export { persistRetainedResult } from "./result.js";
+export {
+  applyCheckpoint,
+  buildPatch,
+  cloneRepository,
+  inspectRepository
+} from "./repository.js";
+export { persistRetainedCheckpoint, persistRetainedResult } from "./result.js";
 export { runValidationCommands } from "./validation.js";
 export {
   InvalidTransitionError,
@@ -42,6 +47,7 @@ export type {
   GenericTaskOutcome,
   HostName,
   HostOutcomeCode,
+  HostRunResult,
   HostUsage,
   LeasedTask,
   LeasedTaskPolicy,

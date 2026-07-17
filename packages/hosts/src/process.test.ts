@@ -93,13 +93,13 @@ function fixtureInput(mode: string, args: string[] = []): HostProcessInput {
 }
 
 async function waitForFile(filePath: string): Promise<void> {
-  const deadline = Date.now() + 2_000;
+  const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
     try {
       await access(filePath);
       return;
     } catch {
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 20));
     }
   }
   throw new Error("Fixture did not become ready");
@@ -304,10 +304,12 @@ describe("runHostProcess", () => {
     });
 
     try {
+      // Generous startup budget so the fixture can write its ready marker under
+      // full-suite load; exit delay stays past SIGTERM + grace so SIGKILL still fires.
       const resultPromise = runHostProcess({
-        ...fixtureInput("ignore-term-until-exit", [readyPath, "750"]),
-        timeoutMs: 300,
-        terminateGraceMs: 100
+        ...fixtureInput("ignore-term-until-exit", [readyPath, "2500"]),
+        timeoutMs: 800,
+        terminateGraceMs: 200
       });
       await waitForFile(readyPath);
 

@@ -74,7 +74,7 @@ describe("privacy lifecycle", () => {
       model: null,
       retainUntilVerified: true
     };
-    const ids = ["privacy-session", "privacy-run"];
+    const ids = ["privacy-session", "privacy-run", "privacy-attempt", "privacy-lease"];
     const engine = new GenkiEngine({ stateRoot, createId: () => ids.shift() ?? "unexpected" });
     process.env.GENKI_TEST_SECRET = seededSecret;
 

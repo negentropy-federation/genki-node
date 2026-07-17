@@ -6,8 +6,12 @@ import { cleanupSession, cleanupTaskRun } from "./cleanup.js";
 import { sha256Digest } from "./digest.js";
 import { buildChildEnvironment } from "./environment.js";
 import { buildPatch, cloneRepository, inspectRepository } from "./repository.js";
-import { persistRetainedResult } from "./result.js";
-import { parseSessionPolicy, parseTaskDefinition } from "./schema.js";
+import { persistRetainedCheckpoint, persistRetainedResult } from "./result.js";
+import {
+  parsePartialCheckpoint,
+  parseSessionPolicy,
+  parseTaskDefinition
+} from "./schema.js";
 import { transitionSession, transitionTask } from "./state-machine.js";
 import {
   createSessionStorage,
@@ -18,8 +22,11 @@ import {
   writeJsonAtomic
 } from "./storage.js";
 import type {
+  BoundedValidationSummary,
   GenericSessionStatus,
   GenericTaskOutcome,
+  HostRunResult,
+  PartialCheckpoint,
   PreparedTaskForHost,
   SessionDescription,
   SessionPaths,
@@ -64,6 +71,13 @@ interface RunRecord {
   runId: string;
   sessionId: string;
   state: TaskState;
+  taskId: string;
+  taskRevision: number;
+  attemptId: string;
+  leaseId: string;
+  leaseGeneration: number;
+  host: SessionPolicy["host"];
+  hostResult: HostRunResult | null;
   taskDigest: string;
   baseCommit: string;
   validation: ValidationSummary | null;
@@ -178,6 +192,8 @@ export class GenkiEngine {
         this.#assertTaskPolicy(record, task);
         const inspection = await inspectRepository(task);
         const runId = this.#createId();
+        const attemptId = this.#createId();
+        const leaseId = this.#createId();
         const runPaths = await createTaskRunStorage(paths, runId);
         await writeJsonAtomic(path.join(runPaths.root, "task.json"), task);
         await cloneRepository(inspection, runPaths.workspace);
@@ -185,10 +201,19 @@ export class GenkiEngine {
           runId,
           sessionId,
           state: transitionTask("policy_checked", "prepared"),
+          taskId: task.id,
+          taskRevision: 1,
+          attemptId,
+          leaseId,
+          leaseGeneration: 1,
+          host: record.policy.host,
+          hostResult: null,
           taskDigest: sha256Digest({ task, baseCommit: inspection.baseCommit }),
           baseCommit: inspection.baseCommit,
           validation: null
         };
+        // Persist provenance before any host process launches so crash recovery
+        // can locate the active run without a model conversation.
         runRecord.state = transitionTask(runRecord.state, "executing");
         await writeJsonAtomic(runPaths.runFile, runRecord);
         await writeJsonAtomic(paths.sessionFile, record);
@@ -224,6 +249,100 @@ export class GenkiEngine {
     located.record.state = transitionTask(located.record.state, "finalizing");
     await writeJsonAtomic(located.run.runFile, located.record);
     return validation;
+  }
+
+  async recordHostCompletion(runId: string, hostResult: HostRunResult): Promise<void> {
+    const located = await this.#findRun(runId);
+    if (located.record.state !== "executing") {
+      throw new Error("Host completion can only be recorded while the run is executing");
+    }
+    if (located.record.hostResult !== null) {
+      throw new Error("Host result was already recorded for this run");
+    }
+    if (hostResult.host !== located.record.host) {
+      throw new Error("Host result does not match the session host");
+    }
+    located.record.hostResult = hostResult;
+    await writeJsonAtomic(located.run.runFile, located.record);
+  }
+
+  async checkpointRun(runId: string, hostResult: HostRunResult): Promise<PartialCheckpoint> {
+    const located = await this.#findRun(runId);
+    if (located.record.state !== "executing") {
+      throw new Error("Checkpoints can only be captured from an executing run");
+    }
+    if (hostResult.host !== located.record.host) {
+      throw new Error("Host result does not match the session host");
+    }
+    if (located.record.hostResult === null) {
+      located.record.hostResult = hostResult;
+    } else if (
+      located.record.hostResult.outcome !== hostResult.outcome ||
+      located.record.hostResult.host !== hostResult.host
+    ) {
+      throw new Error("Host result conflicts with the recorded host completion");
+    }
+
+    located.record.state = transitionTask(located.record.state, "checkpointing");
+    await writeJsonAtomic(located.run.runFile, located.record);
+
+    const task = parseTaskDefinition(await readJson(path.join(located.run.root, "task.json")));
+    const patch = await buildPatch(located.run.workspace);
+    const { paths: sessionPaths, record: sessionRecord } = await this.#loadSession(
+      located.record.sessionId
+    );
+    const exceedsPolicy =
+      patch.changedFiles.length === 0 ||
+      patch.changedFiles.length > task.policy.maxChangedFiles ||
+      patch.changedFiles.length > sessionRecord.policy.maxChangedFiles ||
+      patch.patchBytes > task.policy.maxPatchBytes ||
+      patch.patchBytes > sessionRecord.policy.maxPatchBytes;
+
+    if (exceedsPolicy) {
+      located.record.state = transitionTask(located.record.state, "frozen");
+      await writeJsonAtomic(located.run.runFile, located.record);
+      sessionRecord.failed += 1;
+      sessionRecord.lastOutcomeCode = "POLICY_FROZEN";
+      await writeJsonAtomic(sessionPaths.sessionFile, sessionRecord);
+      throw new Error("Checkpoint patch exceeds the active session or task policy");
+    }
+
+    const checkpoint = parsePartialCheckpoint({
+      schemaVersion: "1",
+      taskId: located.record.taskId,
+      taskRevision: located.record.taskRevision,
+      attemptId: located.record.attemptId,
+      leaseId: located.record.leaseId,
+      leaseGeneration: located.record.leaseGeneration,
+      baseCommit: located.record.baseCommit,
+      patch: patch.patch,
+      patchDigest: patch.patchDigest,
+      changedFiles: patch.changedFiles,
+      validation:
+        located.record.validation === null
+          ? null
+          : toBoundedValidationSummary(located.record.validation),
+      host: hostResult.host,
+      hostOutcome: hostResult.outcome,
+      completedCriteria: [...hostResult.completedCriteria],
+      remainingCriteria: [...hostResult.remainingCriteria],
+      createdAt: this.#now().toISOString()
+    });
+
+    located.record.state = transitionTask(located.record.state, "uploading_checkpoint");
+    located.record.state = transitionTask(located.record.state, "checkpointed");
+    await writeJsonAtomic(located.run.runFile, located.record);
+
+    if (sessionRecord.policy.retainUntilVerified) {
+      await persistRetainedCheckpoint({
+        runRoot: located.run.root,
+        checkpoint
+      });
+    }
+
+    sessionRecord.lastOutcomeCode = hostResult.outcome.toUpperCase();
+    await writeJsonAtomic(sessionPaths.sessionFile, sessionRecord);
+    return checkpoint;
   }
 
   async finalizeAndDeliver(runId: string): Promise<GenericTaskOutcome> {
@@ -377,4 +496,20 @@ export class GenkiEngine {
       lastOutcomeCode: record.lastOutcomeCode
     };
   }
+}
+
+function toBoundedValidationSummary(validation: ValidationSummary): BoundedValidationSummary {
+  return {
+    passed: validation.passed,
+    durationMs: validation.durationMs,
+    commands: validation.commands.map((command) => ({
+      executable: path.basename(command.argv[0] ?? "unknown"),
+      exitCode:
+        command.exitCode === null
+          ? null
+          : Math.min(255, Math.max(0, command.exitCode)),
+      timedOut: command.timedOut,
+      durationMs: command.durationMs
+    }))
+  };
 }

@@ -41,6 +41,15 @@ export interface HostUsage {
   reasoningOutputTokens: number;
 }
 
+export interface HostRunResult {
+  host: HostName;
+  outcome: HostOutcomeCode;
+  exitCode: number | null;
+  usage: HostUsage | null;
+  completedCriteria: string[];
+  remainingCriteria: string[];
+}
+
 export const ACCEPTED_SPDX_LICENSES = [
   "Apache-2.0",
   "MIT",

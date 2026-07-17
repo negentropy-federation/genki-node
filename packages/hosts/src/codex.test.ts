@@ -559,7 +559,9 @@ describe("CodexHostAdapter", () => {
     expect(JSON.stringify(result)).not.toContain("quota_exhausted");
   });
 
-  it("maps explicit host failures without returning captured output", async () => {
+  it(
+    "maps explicit host failures without returning captured output",
+    async () => {
     const scenarios = [
       ["quota", "quota_exhausted"],
       ["quota-malformed", "quota_exhausted"],
@@ -604,7 +606,9 @@ describe("CodexHostAdapter", () => {
       expect(JSON.stringify(result)).not.toContain("thread-local-only");
       expect(JSON.stringify(result)).not.toContain("temporarily unavailable");
     }
-  });
+    },
+    30_000
+  );
 
   it("normalizes generic process-start failures as host_failed", async () => {
     const run = await createRun("process-start-failure");

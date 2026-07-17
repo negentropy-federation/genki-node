@@ -1,6 +1,11 @@
-import type { HostName, HostOutcomeCode, HostUsage } from "../../core/src/types.js";
+import type { HostName, HostRunResult } from "../../core/src/types.js";
 
-export type { HostName, HostOutcomeCode, HostUsage } from "../../core/src/types.js";
+export type {
+  HostName,
+  HostOutcomeCode,
+  HostRunResult,
+  HostUsage
+} from "../../core/src/types.js";
 
 export interface HostAvailability {
   available: boolean;
@@ -18,15 +23,6 @@ export interface HostRunInput {
   timeoutSeconds: number;
   temporaryHome: string;
   abortSignal: AbortSignal;
-}
-
-export interface HostRunResult {
-  host: HostName;
-  outcome: HostOutcomeCode;
-  exitCode: number | null;
-  usage: HostUsage | null;
-  completedCriteria: string[];
-  remainingCriteria: string[];
 }
 
 export interface HostAdapter {
