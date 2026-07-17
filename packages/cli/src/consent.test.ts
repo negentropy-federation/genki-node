@@ -20,10 +20,11 @@ describe("session consent", () => {
     expect(rendered).toContain("1 hour");
     expect(rendered).toContain("3 tasks");
     expect(rendered).toContain("node");
-    expect(rendered).toContain("automatically approved");
-    expect(rendered).not.toContain("repository");
+    expect(rendered).toContain("upload automatically");
+    expect(rendered).toContain("hidden by default");
     expect(rendered).not.toContain("instructions");
-    expect(rendered).not.toContain("patch");
+    expect(rendered).not.toContain("/Users/");
+    expect(rendered).not.toContain("diff --git");
   });
 
   it.each([

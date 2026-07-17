@@ -20,12 +20,16 @@ async function exists(target: string): Promise<boolean> {
 }
 
 describe("expired-session cleanup", () => {
-  it("clears marked artifacts without Agy or an executable PATH", async () => {
+  it("clears marked artifacts without Agy, Codex, or network", async () => {
     const stateRoot = await mkdtemp(path.join(os.tmpdir(), "genki-expired-state-"));
     const session = await createSessionStorage(stateRoot, "expired-session");
     const run = await createTaskRunStorage(session, "expired-run");
     await writeFile(session.agyLogPath, "redirected Agy log");
     await writeFile(path.join(run.root, "private-task.txt"), "private task residue");
+    await writeFile(path.join(run.root, "checkpoint.diff"), "diff residue");
+    await writeFile(path.join(run.root, "checkpoint.json"), "{}");
+    await writeFile(path.join(run.root, "codex.log"), "host log residue");
+    await writeFile(path.join(run.temporaryHome, "token"), "session-token-residue");
     await writeJsonAtomic(session.sessionFile, { expiresAt: "2026-07-15T00:00:00.000Z" });
     const originalPath = process.env.PATH;
     process.env.PATH = "";
@@ -41,5 +45,6 @@ describe("expired-session cleanup", () => {
     }
 
     expect(await exists(session.root)).toBe(false);
+    expect(await exists(run.root)).toBe(false);
   });
 });

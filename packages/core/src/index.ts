@@ -8,6 +8,11 @@ export { ACCEPTED_SPDX_LICENSES } from "./types.js";
 export { canonicalJson, sha256Digest } from "./digest.js";
 export { buildChildEnvironment } from "./environment.js";
 export { GenkiEngine } from "./engine.js";
+export type {
+  MaterializedRunResult,
+  PrepareLeasedTaskInput,
+  PreparedLeasedTask
+} from "./engine.js";
 export {
   applyCheckpoint,
   buildPatch,

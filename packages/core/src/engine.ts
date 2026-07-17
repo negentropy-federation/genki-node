@@ -5,7 +5,12 @@ import path from "node:path";
 import { cleanupSession, cleanupTaskRun } from "./cleanup.js";
 import { sha256Digest } from "./digest.js";
 import { buildChildEnvironment } from "./environment.js";
-import { buildPatch, cloneRepository, inspectRepository } from "./repository.js";
+import {
+  applyCheckpoint,
+  buildPatch,
+  cloneRepository,
+  inspectRepository
+} from "./repository.js";
 import { persistRetainedCheckpoint, persistRetainedResult } from "./result.js";
 import {
   parsePartialCheckpoint,
@@ -26,7 +31,9 @@ import type {
   GenericSessionStatus,
   GenericTaskOutcome,
   HostRunResult,
+  LeasedTask,
   PartialCheckpoint,
+  PatchSummary,
   PreparedTaskForHost,
   SessionDescription,
   SessionPaths,
@@ -87,6 +94,37 @@ interface LocatedRun {
   session: SessionPaths;
   run: TaskRunPaths;
   record: RunRecord;
+}
+
+export interface PreparedLeasedTask extends PreparedTaskForHost {
+  attemptId: string;
+  leaseId: string;
+  leaseGeneration: number;
+  taskId: string;
+  taskRevision: number;
+  baseCommit: string;
+  temporaryHome: string;
+  runRoot: string;
+}
+
+export interface MaterializedRunResult {
+  outcome: GenericTaskOutcome;
+  patch: PatchSummary;
+  validation: ValidationSummary;
+  boundedValidation: BoundedValidationSummary;
+  taskId: string;
+  taskRevision: number;
+  attemptId: string;
+  leaseId: string;
+  leaseGeneration: number;
+  baseCommit: string;
+}
+
+export interface PrepareLeasedTaskInput {
+  sessionId: string;
+  leased: LeasedTask;
+  localRepositoryPath: string;
+  predecessor?: PartialCheckpoint | null;
 }
 
 export class GenkiEngine {
@@ -225,6 +263,189 @@ export class GenkiEngine {
       }
     }
     return null;
+  }
+
+  async prepareLeasedTask(input: PrepareLeasedTaskInput): Promise<PreparedLeasedTask> {
+    const { paths, record } = await this.#loadSession(input.sessionId);
+    if (await this.#expireIfNeeded(paths, record)) {
+      throw new Error("Session is not active");
+    }
+    if (record.state !== "active") {
+      throw new Error("Session is not active");
+    }
+    if (
+      record.completed + record.failed >= record.policy.maxTasks ||
+      input.leased.policy.maxRuntimeSeconds > record.policy.maxTaskRuntimeSeconds ||
+      input.leased.policy.maxRuntimeSeconds >
+        record.policy.maxTotalRuntimeSeconds - record.consumedRuntimeSeconds ||
+      input.leased.policy.maxChangedFiles > record.policy.maxChangedFiles ||
+      input.leased.policy.maxPatchBytes > record.policy.maxPatchBytes
+    ) {
+      throw new Error("Leased task exceeds the active session policy");
+    }
+    const allowed = new Set(record.policy.allowedExecutables);
+    for (const command of input.leased.validation) {
+      const executable = path.basename(command.argv[0]);
+      if (!allowed.has(executable)) {
+        throw new Error(`Validation executable is not allowed: ${executable}`);
+      }
+    }
+
+    const localTask: TaskDefinition = {
+      schemaVersion: "1",
+      id: input.leased.taskId,
+      title: "leased-task",
+      repository: {
+        path: path.resolve(input.localRepositoryPath),
+        baseRef: input.leased.project.baseCommit
+      },
+      instructions: input.leased.goal,
+      validation: input.leased.validation,
+      policy: {
+        maxRuntimeSeconds: input.leased.policy.maxRuntimeSeconds,
+        maxChangedFiles: input.leased.policy.maxChangedFiles,
+        maxPatchBytes: input.leased.policy.maxPatchBytes
+      }
+    };
+    const inspection = await inspectRepository(localTask);
+    if (inspection.baseCommit !== input.leased.project.baseCommit) {
+      throw new Error("Local repository base commit does not match the leased task");
+    }
+
+    const runId = this.#createId();
+    const attemptId = this.#createId();
+    const runPaths = await createTaskRunStorage(paths, runId);
+    await writeJsonAtomic(path.join(runPaths.root, "task.json"), localTask);
+    await writeJsonAtomic(path.join(runPaths.root, "leased-task.json"), input.leased);
+    await cloneRepository(inspection, runPaths.workspace);
+    if (input.predecessor) {
+      await applyCheckpoint(runPaths.workspace, input.predecessor);
+    }
+
+    const runRecord: RunRecord = {
+      runId,
+      sessionId: input.sessionId,
+      state: transitionTask("policy_checked", "prepared"),
+      taskId: input.leased.taskId,
+      taskRevision: input.leased.revision,
+      attemptId,
+      leaseId: input.leased.leaseId,
+      leaseGeneration: input.leased.leaseGeneration,
+      host: record.policy.host,
+      hostResult: null,
+      taskDigest: sha256Digest({
+        task: input.leased,
+        baseCommit: inspection.baseCommit
+      }),
+      baseCommit: inspection.baseCommit,
+      validation: null
+    };
+    runRecord.state = transitionTask(runRecord.state, "executing");
+    await writeJsonAtomic(runPaths.runFile, runRecord);
+    await writeJsonAtomic(paths.sessionFile, record);
+    return {
+      runId,
+      workspace: runPaths.workspace,
+      instructions: input.leased.goal,
+      attemptId,
+      leaseId: input.leased.leaseId,
+      leaseGeneration: input.leased.leaseGeneration,
+      taskId: input.leased.taskId,
+      taskRevision: input.leased.revision,
+      baseCommit: inspection.baseCommit,
+      temporaryHome: runPaths.temporaryHome,
+      runRoot: runPaths.root
+    };
+  }
+
+  async inspectPatch(runId: string): Promise<PatchSummary> {
+    const located = await this.#findRun(runId);
+    return buildPatch(located.run.workspace);
+  }
+
+  async materializeResult(runId: string): Promise<MaterializedRunResult> {
+    const located = await this.#findRun(runId);
+    if (located.record.state !== "finalizing" || located.record.validation === null) {
+      throw new Error("Run is not ready for finalization");
+    }
+    const task = parseTaskDefinition(await readJson(path.join(located.run.root, "task.json")));
+    const patch = await buildPatch(located.run.workspace);
+    const { paths: sessionPaths, record: sessionRecord } = await this.#loadSession(
+      located.record.sessionId
+    );
+    const exceedsPolicy =
+      patch.changedFiles.length > task.policy.maxChangedFiles ||
+      patch.changedFiles.length > sessionRecord.policy.maxChangedFiles ||
+      patch.patchBytes > task.policy.maxPatchBytes ||
+      patch.patchBytes > sessionRecord.policy.maxPatchBytes;
+
+    let outcome: GenericTaskOutcome;
+    if (exceedsPolicy) {
+      located.record.state = transitionTask(located.record.state, "frozen");
+      outcome = { code: "POLICY_FROZEN", passed: false };
+    } else if (!located.record.validation.passed) {
+      located.record.state = transitionTask(located.record.state, "failed");
+      outcome = { code: "VALIDATION_FAILED", passed: false };
+    } else {
+      located.record.state = transitionTask(located.record.state, "uploading_result");
+      located.record.state = transitionTask(located.record.state, "delivered");
+      outcome = { code: "DELIVERED", passed: true };
+    }
+    await writeJsonAtomic(located.run.runFile, located.record);
+
+    if (sessionRecord.policy.retainUntilVerified) {
+      await persistRetainedResult({
+        runRoot: located.run.root,
+        outcome,
+        patch,
+        validation: located.record.validation
+      });
+    }
+
+    if (outcome.passed) {
+      sessionRecord.completed += 1;
+    } else {
+      sessionRecord.failed += 1;
+    }
+    sessionRecord.consumedRuntimeSeconds += Math.ceil(located.record.validation.durationMs / 1000);
+    sessionRecord.lastOutcomeCode = outcome.code;
+    await writeJsonAtomic(sessionPaths.sessionFile, sessionRecord);
+
+    return {
+      outcome,
+      patch,
+      validation: located.record.validation,
+      boundedValidation: toBoundedValidationSummary(located.record.validation),
+      taskId: located.record.taskId,
+      taskRevision: located.record.taskRevision,
+      attemptId: located.record.attemptId,
+      leaseId: located.record.leaseId,
+      leaseGeneration: located.record.leaseGeneration,
+      baseCommit: located.record.baseCommit
+    };
+  }
+
+  async purgeRun(runId: string): Promise<void> {
+    const located = await this.#findRun(runId);
+    const { record: sessionRecord } = await this.#loadSession(located.record.sessionId);
+    if (!sessionRecord.policy.retainUntilVerified) {
+      await cleanupTaskRun(located.session, runId);
+    }
+  }
+
+  async noteSessionOutcome(
+    sessionId: string,
+    outcome: { failed?: boolean; lastOutcomeCode: string; runtimeSeconds?: number }
+  ): Promise<void> {
+    const { paths, record } = await this.#loadSession(sessionId);
+    if (outcome.failed) {
+      record.failed += 1;
+    }
+    if (outcome.runtimeSeconds !== undefined) {
+      record.consumedRuntimeSeconds += outcome.runtimeSeconds;
+    }
+    record.lastOutcomeCode = outcome.lastOutcomeCode;
+    await writeJsonAtomic(paths.sessionFile, record);
   }
 
   async runValidation(runId: string): Promise<ValidationSummary> {

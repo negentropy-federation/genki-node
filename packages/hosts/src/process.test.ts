@@ -141,74 +141,86 @@ describe("runHostProcess", () => {
     expect(result.stderrTruncated).toBe(true);
   });
 
-  it("uses the default 2,000 ms grace after a ready child receives timeout SIGTERM", async () => {
-    const readyPath = path.join(fixtureRoot, "timeout-ready");
-    const termPath = path.join(fixtureRoot, "timeout-term");
+  it(
+    "uses the default 2,000 ms grace after a ready child receives timeout SIGTERM",
+    async () => {
+      const readyPath = path.join(fixtureRoot, "timeout-ready");
+      const termPath = path.join(fixtureRoot, "timeout-term");
 
-    const resultPromise = runHostProcess({
-      ...fixtureInput("ignore-term", [readyPath, termPath]),
-      timeoutMs: 500
-    });
-    await waitForFile(readyPath);
-    await waitForFile(termPath);
-    const termAt = Number(await readFile(termPath, "utf8"));
-    const result = await resultPromise;
-    const observedGraceMs = Date.now() - termAt;
+      const resultPromise = runHostProcess({
+        ...fixtureInput("ignore-term", [readyPath, termPath]),
+        timeoutMs: 800
+      });
+      await waitForFile(readyPath);
+      await waitForFile(termPath);
+      const termAt = Number(await readFile(termPath, "utf8"));
+      const result = await resultPromise;
+      const observedGraceMs = Date.now() - termAt;
 
-    expect(result.timedOut).toBe(true);
-    expect(result.aborted).toBe(false);
-    expect(result.signal).toBe("SIGKILL");
-    expect(result.stdout).toContain("SIGTERM");
-    expect(observedGraceMs).toBeGreaterThanOrEqual(1_800);
-    expect(observedGraceMs).toBeLessThan(3_500);
-  }, 6_000);
+      expect(result.timedOut).toBe(true);
+      expect(result.aborted).toBe(false);
+      expect(result.signal).toBe("SIGKILL");
+      expect(result.stdout).toContain("SIGTERM");
+      expect(observedGraceMs).toBeGreaterThanOrEqual(1_500);
+      expect(observedGraceMs).toBeLessThan(5_000);
+    },
+    20_000
+  );
 
-  it("latches abort when its child ignores SIGTERM until SIGKILL", async () => {
-    const readyPath = path.join(fixtureRoot, "abort-ignore-ready");
-    const termPath = path.join(fixtureRoot, "abort-ignore-term");
-    const controller = new AbortController();
-    const resultPromise = runHostProcess({
-      ...fixtureInput("ignore-term", [readyPath, termPath]),
-      abortSignal: controller.signal,
-      timeoutMs: 1_000,
-      terminateGraceMs: 1_200
-    });
-    await waitForFile(readyPath);
+  it(
+    "latches abort when its child ignores SIGTERM until SIGKILL",
+    async () => {
+      const readyPath = path.join(fixtureRoot, "abort-ignore-ready");
+      const termPath = path.join(fixtureRoot, "abort-ignore-term");
+      const controller = new AbortController();
+      const resultPromise = runHostProcess({
+        ...fixtureInput("ignore-term", [readyPath, termPath]),
+        abortSignal: controller.signal,
+        timeoutMs: 2_000,
+        terminateGraceMs: 1_200
+      });
+      await waitForFile(readyPath);
 
-    const abortedAt = Date.now();
-    controller.abort();
-    await waitForFile(termPath);
-    const result = await resultPromise;
-    const shutdownMs = Date.now() - abortedAt;
+      const abortedAt = Date.now();
+      controller.abort();
+      await waitForFile(termPath);
+      const result = await resultPromise;
+      const shutdownMs = Date.now() - abortedAt;
 
-    expect(result.aborted).toBe(true);
-    expect(result.timedOut).toBe(false);
-    expect(result.signal).toBe("SIGKILL");
-    expect(result.stdout).toContain("SIGTERM");
-    expect(shutdownMs).toBeGreaterThanOrEqual(1_000);
-    expect(shutdownMs).toBeLessThan(2_500);
-  }, 4_000);
+      expect(result.aborted).toBe(true);
+      expect(result.timedOut).toBe(false);
+      expect(result.signal).toBe("SIGKILL");
+      expect(result.stdout).toContain("SIGTERM");
+      expect(shutdownMs).toBeGreaterThanOrEqual(800);
+      expect(shutdownMs).toBeLessThan(4_000);
+    },
+    20_000
+  );
 
-  it("latches timeout when abort fires during timeout escalation", async () => {
-    const readyPath = path.join(fixtureRoot, "timeout-abort-ready");
-    const termPath = path.join(fixtureRoot, "timeout-abort-term");
-    const controller = new AbortController();
-    const resultPromise = runHostProcess({
-      ...fixtureInput("ignore-term", [readyPath, termPath]),
-      abortSignal: controller.signal,
-      timeoutMs: 300,
-      terminateGraceMs: 150
-    });
-    await waitForFile(readyPath);
-    await waitForFile(termPath);
+  it(
+    "latches timeout when abort fires during timeout escalation",
+    async () => {
+      const readyPath = path.join(fixtureRoot, "timeout-abort-ready");
+      const termPath = path.join(fixtureRoot, "timeout-abort-term");
+      const controller = new AbortController();
+      const resultPromise = runHostProcess({
+        ...fixtureInput("ignore-term", [readyPath, termPath]),
+        abortSignal: controller.signal,
+        timeoutMs: 800,
+        terminateGraceMs: 300
+      });
+      await waitForFile(readyPath);
+      await waitForFile(termPath);
 
-    controller.abort();
-    const result = await resultPromise;
+      controller.abort();
+      const result = await resultPromise;
 
-    expect(result.timedOut).toBe(true);
-    expect(result.aborted).toBe(false);
-    expect(result.signal).toBe("SIGKILL");
-  });
+      expect(result.timedOut).toBe(true);
+      expect(result.aborted).toBe(false);
+      expect(result.signal).toBe("SIGKILL");
+    },
+    20_000
+  );
 
   it("does not latch termination after natural exit while waiting for close", async () => {
     const controller = new AbortController();

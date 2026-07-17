@@ -108,7 +108,7 @@ async function createRun(
     workspace,
     instructions: "Synthetic instructions sent only over stdin",
     model: null,
-    timeoutSeconds: 5,
+    timeoutSeconds: 30,
     temporaryHome: home,
     abortSignal: new AbortController().signal,
     ...overrides

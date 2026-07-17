@@ -14,9 +14,17 @@ describe("README", () => {
       "genki stop",
       "genki cleanup",
       "hidden by default",
-      "Agy-owned records"
+      "Agy-owned records",
+      "--host agy",
+      "--host codex",
+      "--coordinator",
+      "outer-sandbox",
+      "experimental"
     ]) {
       expect(readme).toContain(requiredText);
     }
+
+    expect(readme).not.toMatch(/pool personal.*(ChatGPT|Claude|Copilot)/iu);
+    expect(readme).not.toMatch(/arbitrary remote private repositories are supported/iu);
   });
 });

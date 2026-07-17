@@ -16,6 +16,8 @@
     "plugins/agy/plugin.json",
     "plugins/agy/mcp_config.json",
     "plugins/agy/skills/genki-contribution/SKILL.md",
+    "plugins/codex/genki-node/.codex-plugin/plugin.json",
+    "plugins/codex/genki-node/skills/genki-contribution/SKILL.md",
     "README.md"
   ],
   "scripts": {

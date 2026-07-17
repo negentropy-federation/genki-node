@@ -10,9 +10,16 @@ export class CliUsageError extends Error {
   }
 }
 
+export type CoordinatorTarget = { kind: "local" } | { kind: "http"; url: string };
+
 export type CliCommand =
   | { command: "help" }
-  | { command: "contribute"; taskDirectory: string; policy: SessionPolicy }
+  | {
+      command: "contribute";
+      taskDirectory: string;
+      policy: SessionPolicy;
+      coordinator: CoordinatorTarget;
+    }
   | { command: "status" | "stop"; sessionId: string }
   | { command: "cleanup-session"; sessionId: string }
   | { command: "cleanup-expired" };
@@ -50,8 +57,31 @@ function safeSessionId(value: string | undefined): string {
   return value;
 }
 
+function parseCoordinator(value: string): CoordinatorTarget {
+  if (value === "local") {
+    return { kind: "local" };
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new CliUsageError("--coordinator must be 'local' or an absolute URL");
+  }
+  const host = parsed.hostname.toLowerCase();
+  const loopback =
+    host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
+  if (parsed.protocol === "https:") {
+    return { kind: "http", url: value };
+  }
+  if (parsed.protocol === "http:" && loopback) {
+    return { kind: "http", url: value };
+  }
+  throw new CliUsageError("--coordinator remote URLs must use HTTPS (loopback HTTP allowed for tests)");
+}
+
 function parseContribute(argv: string[]): CliCommand {
   let taskDirectory: string | undefined;
+  let coordinator: CoordinatorTarget = { kind: "local" };
   const policy: SessionPolicy = {
     schemaVersion: "1",
     durationSeconds: 28_800,
@@ -83,6 +113,9 @@ function parseContribute(argv: string[]): CliCommand {
           throw new CliUsageError("--host must be agy or codex");
         }
         policy.host = value;
+        break;
+      case "--coordinator":
+        coordinator = parseCoordinator(value);
         break;
       case "--duration":
         policy.durationSeconds = parseDuration(value, "duration");
@@ -116,7 +149,12 @@ function parseContribute(argv: string[]): CliCommand {
   if (taskDirectory === undefined) {
     throw new CliUsageError("contribute requires --task-dir");
   }
-  return { command: "contribute", taskDirectory, policy: parseSessionPolicy(policy) };
+  return {
+    command: "contribute",
+    taskDirectory,
+    policy: parseSessionPolicy(policy),
+    coordinator
+  };
 }
 
 export function parseCliArgs(argv: string[]): CliCommand {

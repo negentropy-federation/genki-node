@@ -9,6 +9,7 @@ describe("parseCliArgs", () => {
     expect(parseCliArgs(["contribute", "--task-dir", taskDirectory])).toEqual({
       command: "contribute",
       taskDirectory,
+      coordinator: { kind: "local" },
       policy: {
         schemaVersion: "1",
         durationSeconds: 28_800,
@@ -23,6 +24,38 @@ describe("parseCliArgs", () => {
         retainUntilVerified: false
       }
     });
+  });
+
+  it("parses local and HTTPS coordinator targets", () => {
+    expect(
+      parseCliArgs([
+        "contribute",
+        "--task-dir",
+        "/tmp/tasks",
+        "--coordinator",
+        "local"
+      ])
+    ).toMatchObject({ coordinator: { kind: "local" } });
+    expect(
+      parseCliArgs([
+        "contribute",
+        "--task-dir",
+        "/tmp/tasks",
+        "--coordinator",
+        "https://coordinator.example.com"
+      ])
+    ).toMatchObject({
+      coordinator: { kind: "http", url: "https://coordinator.example.com" }
+    });
+    expect(() =>
+      parseCliArgs([
+        "contribute",
+        "--task-dir",
+        "/tmp/tasks",
+        "--coordinator",
+        "http://example.com"
+      ])
+    ).toThrow(/HTTPS/iu);
   });
 
   it("parses explicit bounded contribution options", () => {

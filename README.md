@@ -1,14 +1,14 @@
 # Genki Node
 
-Genki Node is the local contribution agent for the Negentropy Federation. This MVP lets a contributor authorize one bounded session, then lets Agy process a local queue of coding tasks through a local stdio MCP server.
+Genki Node is the local contribution agent for the Negentropy Federation. A contributor authorizes one bounded session; Genki then leases tasks, runs one fresh Agy or Codex process per task, validates changes, and automatically uploads final patches or partial code checkpoints.
 
-The current release is a developer preview for local testing. It does not connect to Federation One, calculate Signal, accept provider credentials, or send results to a remote service.
+Task details are **hidden by default** in contributor-facing status. Cleanup is deterministic local code and does not delete Agy-owned records or provider-side history.
 
 ## Requirements
 
 - Node.js 22.18 or newer
 - Git
-- Agy 1.1.2 or a compatible release available as `agy`
+- Agy 1.1.2+ and/or Codex CLI 0.144.2+ for real host runs (optional for the automated gate)
 
 ## Build and install
 
@@ -18,7 +18,7 @@ npm run check
 npm install -g .
 ```
 
-Validate and install the Agy adapter:
+### Agy plugin
 
 ```bash
 agy plugin validate plugins/agy
@@ -26,20 +26,50 @@ agy plugin install ./plugins/agy
 agy plugin list
 ```
 
-Agy 1.1.2 enables a locally installed plugin automatically. If an existing installation was disabled, enable it explicitly with `agy plugin enable genki-node`.
+### Codex plugin artifact
 
-To replace a previously installed development copy:
+The repository ships a Codex plugin scaffold at `plugins/codex/genki-node` whose manifest name is exactly `genki-node`. Install it with your local Codex plugin workflow when experimenting; Genki's orchestrator still launches Codex as a one-task subprocess and does not depend on marketplace registration.
+
+## Local contribution (default)
 
 ```bash
-agy plugin disable genki-node
-agy plugin uninstall genki-node
-agy plugin install ./plugins/agy
-agy plugin list
+genki contribute --host agy --task-dir /absolute/path/to/tasks
+genki contribute --host codex --task-dir /absolute/path/to/tasks
+```
+
+`--coordinator local` is the default and wraps the local task directory as leased fixtures. An experimental remote client is available as:
+
+```bash
+genki contribute --host agy --task-dir /absolute/path/to/tasks --coordinator https://coordinator.example.com
+```
+
+Remote coordinator mode is **experimental**. Arbitrary remote repositories remain disabled until outer-sandbox acceptance. Personal-plan Agy/Codex availability is not guaranteed. Optional contributor email is unverified metadata, not authentication.
+
+Additional common flags:
+
+```bash
+genki contribute \
+  --task-dir /absolute/path/to/tasks \
+  --host agy \
+  --duration 30m \
+  --max-tasks 3 \
+  --max-total-runtime 20m \
+  --max-task-runtime 10m \
+  --allow node,npm
+```
+
+The launcher shows the session policy once. After consent, patches and checkpoints upload automatically while the session remains authorized. Press Ctrl-C or run `genki stop` to revoke authorization.
+
+```bash
+genki status <session-id>
+genki stop <session-id>
+genki cleanup --session <session-id>
+genki cleanup --all-expired
 ```
 
 ## Task queue
 
-`--task-dir` must be a local directory containing one or more `.json` task files. Files are processed in filename order. Each source repository must be clean, must be referenced by an absolute path, and cannot contain configured submodules or tracked symlinks that escape the repository.
+`--task-dir` must contain `.json` task files processed in filename order. Each source repository must be clean, absolute-path referenced, and free of configured submodules or escaping tracked symlinks.
 
 ```json
 {
@@ -65,68 +95,28 @@ agy plugin list
 }
 ```
 
-Validation commands are argument arrays, never shell command strings. The first argument must be a bare executable name with no path, and that name must be included in the session's `--allow` list.
-
-## Start a contribution session
-
-```bash
-genki contribute \
-  --task-dir /absolute/path/to/tasks \
-  --host agy \
-  --duration 30m \
-  --max-tasks 3 \
-  --max-total-runtime 20m \
-  --max-task-runtime 10m \
-  --allow node,npm
-```
-
-The launcher shows the bounded session policy and asks for consent once. After consent, Agy tool calls inside the dedicated sandboxed session are automatically approved so it can process tasks and deliver outcomes without per-task or result approval prompts. Press Ctrl-C to stop the host process; Genki then closes the normal session and removes its local session artifacts.
-
-Check or stop a session from another terminal:
-
-```bash
-genki status <session-id>
-genki stop <session-id>
-```
-
-Contributor-facing status is generic. Task instructions, repository paths, patches, and validation output are hidden by default.
-
 ## Retained developer testing
-
-Use retention only when inspecting an MVP run locally:
 
 ```bash
 genki contribute --task-dir /absolute/path/to/tasks --retain-until-verified
-```
-
-Retained runs live under `${GENKI_STATE_ROOT:-$HOME/.local/state/genki-node}` and may contain the task, disposable Git workspace, patch, validation output, and the redirected Agy log. Remove a retained session after inspection:
-
-```bash
 genki cleanup --session <session-id>
 ```
-
-Expired marked sessions can be removed without Agy or model quota:
-
-```bash
-genki cleanup --all-expired
-```
-
-Cleanup uses local filesystem code and only removes directories carrying matching Genki ownership markers.
 
 ## Privacy and security boundary
 
 - Genki does not ask for or persist passwords, cookies, session tokens, OAuth refresh tokens, or provider API keys.
-- Validation receives a small environment allowlist and does not inherit arbitrary parent-process variables.
-- The stdio MCP server requires the authorized session ID, rejects other sessions, and accepts only run IDs prepared by its own connection.
+- Host child environments use an allowlist and do not inherit arbitrary parent secrets.
 - Work happens in an independent disposable clone. The source repository is not modified.
-- Task details are hidden by default in contributor-facing output, but they are not secret from the machine owner or from the local host executing the task.
-- Normal cleanup covers Genki-owned session files, disposable workspaces, retained patches, validation output, and the Agy log redirected into the session directory.
-- Agy-owned records outside the Genki state root, including its conversations, history, brain data, provider records, and system logs, are not modified or covered by Genki's cleanup guarantee.
-- This MVP uses controlled local process isolation, not a container or virtual machine. Only run task queues from an operator you trust.
+- Task details are hidden by default in contributor-facing output, but they are not secret from the machine owner.
+- Normal cleanup covers Genki-owned session files, disposable workspaces, retained patches, checkpoints, validation output, and host logs redirected into the session directory.
+- Agy-owned records outside the Genki state root, including conversations, history, brain data, provider records, and system logs, are not modified or covered by Genki's cleanup guarantee.
+- Local cleanup does not delete provider-side records.
+- Signal is calculated only on the server. The client never requests its own award.
+- This milestone uses controlled local fixtures and first-party trusted repositories, not a full outer OS-grade sandbox for arbitrary third-party code.
 
 ## MVP limits
 
-- Agy is the only host adapter.
-- Tasks and result delivery are local; no Federation One backend is connected.
-- No Signal accounting is implemented.
-- No provider plan pooling, credential collection, remote daemon, or telemetry is included.
+- Hosts: Agy and Codex only (experimental personal-plan adapters).
+- Default coordinator is local; HTTP Federation One client is experimental.
+- No production plan pooling, credential collection, remote daemon, or telemetry.
+- Arbitrary remote/third-party repositories wait for the outer-sandbox gate.

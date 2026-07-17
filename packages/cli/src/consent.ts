@@ -18,15 +18,19 @@ function formatDuration(seconds: number): string {
 }
 
 export function renderPolicySummary(summary: PolicySummary): string {
-  const model = summary.model ?? "Agy default";
+  const model = summary.model ?? `${summary.host} default`;
   return [
     `Contribution session: ${formatDuration(summary.durationSeconds)}, up to ${summary.maxTasks} tasks.`,
     `Runtime budget: ${formatDuration(summary.maxTotalRuntimeSeconds)} total, ${formatDuration(summary.maxTaskRuntimeSeconds)} per task.`,
     `Host/model: ${summary.host} / ${model}.`,
     `Validation executables: ${summary.allowedExecutables.join(", ")}.`,
+    "Repository scope: Federation-One-assigned fixtures or first-party repos only until the outer sandbox gate.",
+    "Task network access is off by default.",
     "Task details are hidden by default but remain technically inspectable by the machine owner.",
-    "Agy tool calls within this authorized session are automatically approved.",
-    "Results are delivered automatically. Genki-owned task artifacts are cleared after delivery."
+    "Patches and code checkpoints upload automatically while this session authorization remains active.",
+    "Optional contributor name, slogan, and email are self-declared metadata (email is unverified).",
+    "Results and checkpoints are delivered automatically. Genki-owned task artifacts are cleared after delivery.",
+    "Press Ctrl-C or run genki stop to revoke authorization immediately."
   ].join("\n");
 }
 
