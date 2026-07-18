@@ -8,6 +8,10 @@ import { describe, expect, it } from "vitest";
 import type { PartialCheckpoint, TaskDefinition } from "../../core/src/types.js";
 import { LocalCoordinator } from "./local.js";
 
+const fakePolicy = {
+  schemaVersion: "1" as const, durationSeconds: 3600, maxTasks: 10, maxTotalRuntimeSeconds: 3600, maxTaskRuntimeSeconds: 3600, maxChangedFiles: 10, maxPatchBytes: 1000, allowedExecutables: ["node"], allowedRepositoryClasses: ["public"] as ("public" | "first_party_private")[], host: "agy" as const, executionNetwork: "none" as const
+};
+
 const execFileAsync = promisify(execFile);
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
@@ -73,7 +77,9 @@ describe("LocalCoordinator", () => {
 
     const session = await coordinator.openSession({
       policyDigest: "b".repeat(64),
-      host: "codex",
+      policy: {
+        schemaVersion: "1", durationSeconds: 3600, maxTasks: 10, maxTotalRuntimeSeconds: 3600, maxTaskRuntimeSeconds: 3600, maxChangedFiles: 10, maxPatchBytes: 1000, allowedExecutables: ["node"], allowedRepositoryClasses: ["public"], host: "codex", executionNetwork: "none"
+      },
       contributor: { displayName: null, slogan: null, email: null }
     });
     const first = await coordinator.leaseTask(session);
@@ -102,7 +108,7 @@ describe("LocalCoordinator", () => {
     });
     const session = await coordinator.openSession({
       policyDigest: "b".repeat(64),
-      host: "agy",
+      policy: { ...fakePolicy, host: "agy" },
       contributor: { displayName: null, slogan: null, email: null }
     });
     const leased = await coordinator.leaseTask(session);
@@ -165,7 +171,7 @@ describe("LocalCoordinator", () => {
     });
     const session = await coordinator.openSession({
       policyDigest: "b".repeat(64),
-      host: "agy",
+      policy: { ...fakePolicy, host: "agy" },
       contributor: { displayName: null, slogan: null, email: null }
     });
     const leased = await coordinator.leaseTask(session);

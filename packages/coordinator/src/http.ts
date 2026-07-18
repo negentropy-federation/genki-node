@@ -100,7 +100,7 @@ export class HttpCoordinatorClient implements CoordinatorClient {
       endpoint: "open_session",
       method: "POST",
       path: "/v1/contribution-sessions",
-      idempotencyKey: `open:${input.policyDigest}:${input.host}`,
+      idempotencyKey: `open:${input.policyDigest}:${input.policy.host}`,
       body: input
     });
     return sessionSchema.parse(body);

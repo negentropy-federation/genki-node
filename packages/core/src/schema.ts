@@ -103,8 +103,8 @@ const leasedTaskSchema = z
     project: z.strictObject({
       projectId: safeIdentifier,
       repositoryUrl,
-      visibility: z.literal("public"),
-      licenseSpdx: z.enum(ACCEPTED_SPDX_LICENSES),
+      repositoryClass: z.enum(["public", "first_party_private"]),
+      licenseSpdx: z.enum(ACCEPTED_SPDX_LICENSES).nullable(),
       baseCommit: gitCommit
     }),
     goal: z

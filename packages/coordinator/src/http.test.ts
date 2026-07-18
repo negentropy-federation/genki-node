@@ -14,7 +14,7 @@ const leasedTask: LeasedTask = {
   project: {
     projectId: "federation-os",
     repositoryUrl: "https://github.com/negentropy-federation/os-lab.git",
-    visibility: "public",
+    repositoryClass: "public",
     licenseSpdx: "Apache-2.0",
     baseCommit: "0123456789012345678901234567890123456789"
   },
@@ -47,8 +47,10 @@ describe("HttpCoordinatorClient", () => {
     const client = new HttpCoordinatorClient({ baseUrl: server.baseUrl });
 
     const session = await client.openSession({
-      policyDigest: "a".repeat(64),
-      host: "codex",
+      policyDigest: "sha256:abc",
+      policy: {
+        schemaVersion: "1", durationSeconds: 3600, maxTasks: 10, maxTotalRuntimeSeconds: 3600, maxTaskRuntimeSeconds: 3600, maxChangedFiles: 10, maxPatchBytes: 1000, allowedExecutables: ["node"], allowedRepositoryClasses: ["public"], host: "codex", executionNetwork: "none"
+      },
       contributor: { displayName: null, slogan: null, email: null }
     });
     expect(session.token).toBeTruthy();

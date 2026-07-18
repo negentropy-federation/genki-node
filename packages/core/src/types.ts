@@ -114,8 +114,8 @@ export interface CheckpointReference {
 export interface LeasedTaskProject {
   projectId: string;
   repositoryUrl: string;
-  visibility: "public";
-  licenseSpdx: AcceptedSpdxLicense;
+  repositoryClass: "public" | "first_party_private";
+  licenseSpdx: AcceptedSpdxLicense | null;
   baseCommit: string;
 }
 

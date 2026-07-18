@@ -46,7 +46,7 @@ interface OpenLocalSession {
   token: string;
   expiresAt: string;
   closed: boolean;
-  host: OpenSessionInput["host"];
+  host: OpenSessionInput["policy"]["host"];
   policyDigest: string;
 }
 
@@ -101,7 +101,7 @@ export class LocalCoordinator implements CoordinatorClient {
       token,
       expiresAt,
       closed: false,
-      host: input.host,
+      host: input.policy.host,
       policyDigest: input.policyDigest
     };
     this.#sessions.set(sessionId, session);
@@ -385,7 +385,7 @@ export class LocalCoordinator implements CoordinatorClient {
       project: {
         projectId: "local-fixture",
         repositoryUrl: "https://example.invalid/local-fixture.git",
-        visibility: "public",
+        repositoryClass: "public",
         licenseSpdx: "MIT",
         baseCommit: task.baseCommit
       },

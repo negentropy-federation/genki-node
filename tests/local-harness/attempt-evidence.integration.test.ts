@@ -13,6 +13,10 @@ import { runContributionSession } from "../../packages/orchestrator/src/session.
 
 const execFileAsync = promisify(execFile);
 
+const fakePolicy = {
+  schemaVersion: "1" as const, durationSeconds: 3600, maxTasks: 10, maxTotalRuntimeSeconds: 3600, maxTaskRuntimeSeconds: 3600, maxChangedFiles: 10, maxPatchBytes: 1000, allowedExecutables: ["node"], allowedRepositoryClasses: ["public"] as ("public" | "first_party_private")[], host: "codex" as const, executionNetwork: "none" as const
+};
+
 async function git(cwd: string, ...args: string[]): Promise<void> {
   await execFileAsync("git", args, { cwd });
 }
@@ -119,7 +123,7 @@ describe("attempt evidence", () => {
       // Prove duplicate recognition via a second upload with the same operation id on a new lease.
       const session = await coordinator.openSession({
         policyDigest: description.policyDigest,
-        host: "codex",
+        policy: fakePolicy,
         contributor: { displayName: null, slogan: null, email: null }
       });
       const taskLease = await coordinator.leaseTask(session);

@@ -13,9 +13,23 @@ export interface ContributorClaim {
   email: string | null;
 }
 
+export interface CoordinatorPolicySnapshot {
+  schemaVersion: "1";
+  durationSeconds: number;
+  maxTasks: number;
+  maxTotalRuntimeSeconds: number;
+  maxTaskRuntimeSeconds: number;
+  maxChangedFiles: number;
+  maxPatchBytes: number;
+  allowedExecutables: string[];
+  allowedRepositoryClasses: ("public" | "first_party_private")[];
+  host: HostName;
+  executionNetwork: "none";
+}
+
 export interface OpenSessionInput {
   policyDigest: string;
-  host: HostName;
+  policy: CoordinatorPolicySnapshot;
   contributor: ContributorClaim;
 }
 

@@ -60,7 +60,7 @@ const leasedTask: LeasedTask = {
   project: {
     projectId: "federation-os",
     repositoryUrl: "https://github.com/negentropy-federation/os-lab.git",
-    visibility: "public",
+    repositoryClass: "public",
     licenseSpdx: "Apache-2.0",
     baseCommit: "0123456789012345678901234567890123456789"
   },
@@ -191,7 +191,8 @@ describe("parseLeasedTask", () => {
     expect(() =>
       parseLeasedTask({
         ...leasedTask,
-        project: { ...leasedTask.project, visibility: "private" }
+        // @ts-expect-error Testing invalid repository class
+        project: { ...leasedTask.project, repositoryClass: "private" }
       })
     ).toThrow();
     expect(() =>

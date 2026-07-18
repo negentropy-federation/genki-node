@@ -60,9 +60,27 @@ export async function runContributionSession(
   };
   sessionAbort.addEventListener("abort", onAbort, { once: true });
 
-  const coordinatorSession = await input.coordinator.openSession({
-    policyDigest: input.policyDigest,
+  const { sha256Digest } = await import("../../core/src/digest.js");
+
+  const snapshot = {
+    schemaVersion: "1" as const,
+    durationSeconds: input.policy.durationSeconds,
+    maxTasks: input.policy.maxTasks,
+    maxTotalRuntimeSeconds: input.policy.maxTotalRuntimeSeconds,
+    maxTaskRuntimeSeconds: input.policy.maxTaskRuntimeSeconds,
+    maxChangedFiles: input.policy.maxChangedFiles,
+    maxPatchBytes: input.policy.maxPatchBytes,
+    allowedExecutables: input.policy.allowedExecutables,
+    allowedRepositoryClasses: ["public", "first_party_private"] as ("public" | "first_party_private")[],
     host: input.policy.host,
+    executionNetwork: "none" as const
+  };
+
+  const snapshotDigest = "sha256:" + sha256Digest(snapshot);
+
+  const coordinatorSession = await input.coordinator.openSession({
+    policyDigest: snapshotDigest,
+    policy: snapshot,
     contributor: { displayName: null, slogan: null, email: null }
   });
 

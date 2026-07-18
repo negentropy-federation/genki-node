@@ -391,4 +391,49 @@ describe("runContributionSession", () => {
     },
     60_000
   );
+  it("derives the coordinator policy snapshot and canonical digest correctly", async () => {
+    const p = policy();
+    const coordinator = {
+      openSession: async (input: any) => {
+        expect(input.policyDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+        expect(input.policy).toEqual({
+          schemaVersion: "1",
+          durationSeconds: p.durationSeconds,
+          maxTasks: p.maxTasks,
+          maxTotalRuntimeSeconds: p.maxTotalRuntimeSeconds,
+          maxTaskRuntimeSeconds: p.maxTaskRuntimeSeconds,
+          maxChangedFiles: p.maxChangedFiles,
+          maxPatchBytes: p.maxPatchBytes,
+          allowedExecutables: p.allowedExecutables,
+          allowedRepositoryClasses: ["public", "first_party_private"],
+          host: p.host,
+          executionNetwork: "none"
+        });
+        expect(input.contributor).toEqual({ displayName: null, slogan: null, email: null });
+        return { sessionId: "coord-session", token: "token", expiresAt: "2099-01-01T00:00:00Z" };
+      },
+      leaseTask: async () => null,
+      heartbeat: async () => ({ leaseId: "lease-1", leaseGeneration: 1, active: true, expiresAt: "2099-01-01T00:00:00Z" }),
+      uploadCheckpoint: async () => ({ accepted: true, operationId: "op", reason: "accepted" as const }),
+      uploadResult: async () => ({ accepted: true, operationId: "op", reason: "accepted" as const }),
+      closeSession: async () => {}
+    };
+
+    await runContributionSession({
+      engine: {
+        sessionStatus: async () => ({
+          state: "inactive",
+          elapsedRuntimeSeconds: 0,
+          remainingRuntimeSeconds: 0,
+          tasksCompleted: 0
+        })
+      } as any,
+      coordinator,
+      host: new ScriptedHost([]),
+      sessionId: "session-1",
+      policy: p,
+      policyDigest: "local-digest-ignored",
+      resolveLocalRepository: () => "/ignored"
+    });
+  });
 });
