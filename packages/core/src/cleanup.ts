@@ -75,7 +75,9 @@ export async function cleanupTaskRun(
     runId
   });
   await rm(run.root, { recursive: true, force: false, maxRetries: 2 });
-  return { removedPaths: [run.root] };
+  await rm(run.workspace, { recursive: true, force: false, maxRetries: 2 });
+  await rm(run.temporaryHome, { recursive: true, force: false, maxRetries: 2 });
+  return { removedPaths: [run.root, run.workspace, run.temporaryHome] };
 }
 
 export async function cleanupSession(

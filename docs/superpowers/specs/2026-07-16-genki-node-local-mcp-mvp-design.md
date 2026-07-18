@@ -1,7 +1,18 @@
 # Genki Node Local MCP MVP Design
 
 Date: 2026-07-16
-Status: Implemented and locally verified; next phase defined in `2026-07-16-federation-one-contribution-mvp-design.md`
+Status: **Phase 1 — DELIVERED, SUPERSEDED FOR SCOPE.** Implemented and locally
+verified. This is the narrow first milestone only: local-only, single host
+(Agy), MCP-plugin integration (local `stdio` MCP server + Agy plugin + seven
+MCP tools), **no Codex, no checkpoints, no Federation One**. The current
+canonical scope is defined in `2026-07-16-federation-one-contribution-mvp-design.md`
+and implemented via `2026-07-16-genki-node-codex-checkpoint-mvp.md`, which add
+Codex beside Agy, **replace the Agy-via-MCP-plugin integration with a unified
+host-adapter subprocess model** (one fresh Agy or Codex process per task), add
+local checkpoints/continuation, and connect Federation One (HTTP leases,
+automatic patch + checkpoint upload, coordinator/orchestrator, Signal
+accounting). Do NOT read this file's Non-Goals as current — they exclude Codex,
+checkpoints, and Federation One, all of which are now in scope.
 
 ## Summary
 

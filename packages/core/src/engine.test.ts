@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { cleanupSession } from "./cleanup.js";
 import { GenkiEngine } from "./engine.js";
 import { applyCheckpoint, cloneRepository, inspectRepository } from "./repository.js";
+import { getSessionPaths, getTaskRunPaths } from "./storage.js";
 import type { HostRunResult, SessionPolicy, TaskDefinition } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -106,7 +107,7 @@ describe("GenkiEngine", () => {
       expect(validation.passed).toBe(true);
       const outcome = await engine.finalizeAndDeliver(expectedRunId);
       expect(outcome).toEqual({ code: "DELIVERED", passed: true });
-      expect(await exists(path.dirname(prepared!.workspace))).toBe(false);
+      expect(await exists(prepared!.workspace)).toBe(false);
     }
 
     const status = await engine.sessionStatus(description.sessionId);
@@ -139,13 +140,14 @@ describe("GenkiEngine", () => {
     await engine.runValidation(prepared!.runId);
     await engine.finalizeAndDeliver(prepared!.runId);
 
-    const runRoot = path.dirname(prepared!.workspace);
-    await expect(readFile(path.join(runRoot, "result.json"), "utf8")).resolves.toContain(
+    const sessionPaths = getSessionPaths(stateRoot, description.sessionId);
+    const runPaths = getTaskRunPaths(sessionPaths, prepared!.runId);
+    await expect(readFile(path.join(runPaths.root, "result.json"), "utf8")).resolves.toContain(
       '"code":"DELIVERED"'
     );
-    await expect(readFile(path.join(runRoot, "patch.diff"), "utf8")).resolves.toContain("+export");
+    await expect(readFile(path.join(runPaths.root, "patch.diff"), "utf8")).resolves.toContain("+export");
     await cleanupSession(stateRoot, description.sessionId);
-    expect(await exists(runRoot)).toBe(false);
+    expect(await exists(runPaths.root)).toBe(false);
   });
 
   it("rejects out-of-policy tasks without another consent prompt", async () => {
@@ -251,11 +253,12 @@ describe("GenkiEngine", () => {
       expect(checkpoint.patch).toContain('+export const value = "after";');
       expect(checkpoint.patchDigest).toMatch(/^[0-9a-f]{64}$/u);
 
-      const runRoot = path.dirname(prepared!.workspace);
-      await expect(readFile(path.join(runRoot, "checkpoint.json"), "utf8")).resolves.toContain(
+      const sessionPaths = getSessionPaths(stateRoot, description.sessionId);
+      const runPaths = getTaskRunPaths(sessionPaths, prepared!.runId);
+      await expect(readFile(path.join(runPaths.root, "checkpoint.json"), "utf8")).resolves.toContain(
         '"hostOutcome":"capacity_unavailable"'
       );
-      await expect(readFile(path.join(runRoot, "checkpoint.diff"), "utf8")).resolves.toContain(
+      await expect(readFile(path.join(runPaths.root, "checkpoint.diff"), "utf8")).resolves.toContain(
         "+export"
       );
 

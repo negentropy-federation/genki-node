@@ -150,12 +150,8 @@ export class AgyHostAdapter implements HostAdapter {
 
   async runTask(input: HostRunInput): Promise<HostRunResult> {
     const temporaryHome = path.resolve(input.temporaryHome);
-    const runRoot = path.dirname(temporaryHome);
     const workspace = path.resolve(input.workspace);
-    if (path.dirname(workspace) !== runRoot) {
-      throw new Error("Invalid Agy task paths");
-    }
-    const logPath = path.join(runRoot, "agy.log");
+    const logPath = path.join(temporaryHome, "agy.log");
 
     const environment = copyInheritedEnvironment(this.parentEnvironment);
     environment.HOME = this.nativeHome;

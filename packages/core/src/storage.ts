@@ -26,6 +26,8 @@ export function getSessionPaths(stateRoot: string, sessionId: string): SessionPa
     markerPath: path.join(root, OWNERSHIP_MARKER),
     sessionFile: path.join(root, "session.json"),
     runsRoot: path.join(root, "runs"),
+    workspacesRoot: path.join(root, "workspaces"),
+    homesRoot: path.join(root, "homes"),
     agyLogPath: path.join(root, "agy.log")
   };
 }
@@ -40,8 +42,8 @@ export function getTaskRunPaths(session: SessionPaths, runId: string): TaskRunPa
     root,
     markerPath: path.join(root, OWNERSHIP_MARKER),
     runFile: path.join(root, "run.json"),
-    workspace: path.join(root, "workspace"),
-    temporaryHome: path.join(root, "home")
+    workspace: path.join(session.workspacesRoot, runId),
+    temporaryHome: path.join(session.homesRoot, runId)
   };
 }
 
@@ -63,6 +65,8 @@ export async function createSessionStorage(
   await mkdir(paths.stateRoot, { recursive: true, mode: 0o700 });
   await mkdir(paths.root, { mode: 0o700 });
   await mkdir(paths.runsRoot, { mode: 0o700 });
+  await mkdir(paths.workspacesRoot, { mode: 0o700 });
+  await mkdir(paths.homesRoot, { mode: 0o700 });
   const marker: OwnershipMarker = {
     format: "genki-owned-v1",
     kind: "session",
@@ -79,6 +83,7 @@ export async function createTaskRunStorage(
 ): Promise<TaskRunPaths> {
   const paths = getTaskRunPaths(session, runId);
   await mkdir(paths.root, { mode: 0o700 });
+  await mkdir(paths.workspace, { mode: 0o700 });
   await mkdir(paths.temporaryHome, { mode: 0o700 });
   const marker: OwnershipMarker = {
     format: "genki-owned-v1",

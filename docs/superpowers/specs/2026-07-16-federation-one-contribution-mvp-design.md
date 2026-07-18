@@ -7,7 +7,9 @@ Status: Approved direction; implementation pending
 
 The next Genki Node milestone connects the existing local contribution MVP to a
 minimal Federation One coordinator and adds Codex beside Agy as a local host.
-The coordinator assigns small public-repository tasks through expiring leases.
+The coordinator assigns small Federation-One tasks through expiring leases.
+Repositories may be public or first-party private (e.g. the Federation OS
+codebase); eligibility is not gated on public/open-source status.
 The node executes each task inside a disposable, network-denied workspace and
 automatically uploads a final patch or a partial checkpoint under the single
 authorization granted when the contribution session starts.
@@ -34,8 +36,10 @@ and user campaign support are explicitly outside this milestone.
 - Agy and Codex are the only host adapters in this milestone.
 - Claude personal plans are not supported.
 - API, BYOK, enterprise channels, and local models are not implemented yet.
-- Only public repositories with an explicitly accepted open-source license are
-  eligible for community nodes.
+- Repository eligibility is governed by the Federation One task source and the
+  execution sandbox, not by public/open-source status. First-party private
+  repositories (e.g. Federation OS) are eligible in Mode A. (Superseded the
+  earlier "public repositories only" rule per user direction, 2026-07-17.)
 - Execution is offline by default. A task may declare dependency sources for a
   separate preparation phase, but arbitrary task-time network access is denied.
 - Email is optional, private, unverified, and used only as a self-declared
@@ -61,7 +65,11 @@ and user campaign support are explicitly outside this milestone.
 - Checkpoint continuation on a fresh node and fresh model conversation.
 - Capacity failure classification without relying on a provider quota API.
 - Minimal usage evidence when a host reports it.
-- Public repositories and allowlisted open-source licenses only.
+- Repositories assigned by Federation One, including first-party private
+  repositories (e.g. the Federation OS codebase). Eligibility is **not**
+  restricted to public or open-source-licensed repositories; execution safety
+  rests on the disposable, network-denied sandbox rather than on repository
+  visibility.
 - Disposable workspaces, restricted process environments, offline execution,
   bounded resource use, and deterministic model-free cleanup.
 - A local fake coordinator for end-to-end client tests.
@@ -72,12 +80,27 @@ and user campaign support are explicitly outside this milestone.
 - Server-side model calls or remote desktop control.
 - Claude personal-plan integration.
 - API-key, BYOK, enterprise, or local-model adapters.
-- Private or confidential repositories on community nodes.
 - User-created project campaigns or contributed servers.
 - Automatic merging into a protected branch.
 - Cryptocurrency contributions.
 - Public reward promises or financial redemption of Signal.
 - A final public contributor-name or slogan default.
+
+**Deferral note (not permanent rejection):** "User-created project campaigns or
+contributed servers" and GitHub pull-request / protected-branch merge automation
+are excluded *from this milestone only* because they belong to the GitHub
+Project Funding Mode (Mode B), recorded as future in
+`decisions/0006-github-project-funding-mode.md`.
+
+**Repository scope:** There is no "public repositories / open-source license
+only" restriction. Mode A contributors work on Federation-One-assigned repos,
+which include first-party **private** repositories such as the Federation OS
+codebase — that is the point of Mode A. Repository eligibility is governed by
+the Federation One task source and the execution sandbox, not by public/OSS
+status. Exposure of first-party private code to a volunteer machine is an
+accepted tradeoff mitigated by the disposable, network-denied sandbox, log
+redaction, and deterministic cleanup; harden this further at the outer-sandbox
+acceptance gate.
 
 ## Architecture
 
@@ -144,7 +167,8 @@ leased. The consent summary includes:
 - Session duration and absolute expiration.
 - Maximum tasks, total runtime, and per-task runtime.
 - Maximum changed files and patch bytes.
-- Public-repository-only scope.
+- Repository scope: Federation-One-assigned repos, public or first-party
+  private (no public/open-source-only restriction).
 - Allowed validation executables.
 - Default-off task network access.
 - Automatic patch and checkpoint upload.
@@ -476,14 +500,16 @@ terminal scrollback, backups, snapshots, or data copied by the machine owner.
 
 - Add coordinator sessions, task leases, heartbeats, idempotent checkpoint and
   result upload, and a local fake coordinator.
-- Add remote public repository acquisition with immutable base commits.
-- Keep arbitrary remote execution disabled until Phase 3 passes.
+- Add remote repository acquisition with immutable base commits, first-party
+  Federation repositories first (public or private).
+- Keep arbitrary third-party remote execution disabled until Phase 3 passes.
 
 ### Phase 3: Outer Sandbox And Remote Pilot
 
 - Enforce filesystem, process, resource, and default-deny network isolation.
 - Run malicious-repository and credential-exfiltration acceptance tests.
-- Pilot only Negentropy Federation controlled public repositories.
+- Pilot only Negentropy Federation controlled repositories (public or
+  first-party private); arbitrary third-party repositories stay disabled.
 
 ### Phase 4: Trusted Verification And Signal
 
@@ -491,9 +517,10 @@ terminal scrollback, backups, snapshots, or data copied by the machine owner.
 - Record work and attempt Signal from immutable server-side events.
 - Publish a mock-to-live contribution dashboard feed without exposing email.
 
-User project campaigns, private repositories, additional provider channels,
-cryptocurrency contributions, and Federation OS development at scale require
-separate approved designs.
+User project campaigns (Mode B), arbitrary third-party repositories, additional
+provider channels, cryptocurrency contributions, and Federation OS development
+at scale require separate approved designs. (First-party private repositories
+are in scope for Mode A and no longer deferred.)
 
 ## Acceptance Criteria
 

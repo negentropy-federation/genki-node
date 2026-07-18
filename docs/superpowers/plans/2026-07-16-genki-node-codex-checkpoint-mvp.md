@@ -17,7 +17,7 @@
 - Personal-plan adapters are experimental and carry no availability or production-capacity promise.
 - API, BYOK, enterprise, local-model, and Claude adapters are excluded.
 - Only controlled local fixtures are executable until outer-sandbox acceptance tests pass.
-- Remote task schema accepts only public repositories with accepted SPDX licenses and immutable base commits.
+- Remote task schema accepts Federation-One-assigned repositories (public or first-party private, e.g. Federation OS) with immutable base commits; eligibility is not gated on public/open-source status. `licenseSpdx` remains an optional descriptive field. (Updated 2026-07-17 per user direction to drop the public-only restriction; arbitrary third-party repos still wait for the outer sandbox gate.)
 - Task execution network is `none`; dependency-domain support is schema-only in this plan.
 - Final patches and partial checkpoints upload automatically while the session authorization remains valid.
 - Checkpoints contain code state and bounded summaries, never conversation history, hidden reasoning, or raw host transcripts.

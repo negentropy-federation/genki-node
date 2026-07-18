@@ -283,4 +283,112 @@ describe("runContributionSession", () => {
     expect(summary.stopped).toBe(true);
     expect(host.calls).toHaveLength(1);
   });
+
+  it(
+    "does not upload a result when source repository is contaminated",
+    async () => {
+      const stateRoot = await mkdtemp(path.join(os.tmpdir(), "genki-orch-state-"));
+      const queue = await mkdtemp(path.join(os.tmpdir(), "genki-orch-queue-"));
+      const repo = await createRepo();
+      await writeFile(path.join(queue, "01.json"), JSON.stringify(task("contam-task", repo)));
+
+      const engine = new GenkiEngine({ stateRoot });
+      const description = await engine.describeSession({
+        taskDirectory: queue,
+        policy: { ...policy(), maxTasks: 1 }
+      });
+      await engine.activateSession(description.sessionId, description.policyDigest);
+      const coordinator = new LocalCoordinator({ taskDirectory: queue });
+      const controller = new AbortController();
+      const host = new ScriptedHost([
+        async (input) => {
+          // Contaminate the source repo
+          await writeFile(path.join(repo, "contaminated.txt"), "oops");
+          
+          await writeFile(path.join(input.workspace, "value.js"), 'export const value = "after";\n');
+          controller.abort();
+          return {
+            host: "codex",
+            outcome: "completed",
+            exitCode: 0,
+            usage: null,
+            completedCriteria: [],
+            remainingCriteria: []
+          };
+        }
+      ]);
+
+      const summary = await runContributionSession({
+        engine,
+        coordinator,
+        host,
+        sessionId: description.sessionId,
+        policy: policy(),
+        policyDigest: description.policyDigest,
+        resolveLocalRepository: (leased) => coordinator.resolveLocalRepository(leased),
+        abortSignal: controller.signal
+      });
+
+      expect(summary.completed).toBe(0);
+      expect(summary.failed).toBeGreaterThan(0);
+      expect(summary.lastOutcomeCode).toBe("SOURCE_CONTAMINATION");
+
+      const ops = coordinator.listOperations();
+      const results = ops.filter((op) => op.kind === "result");
+      expect(results).toHaveLength(0);
+    },
+    60_000
+  );
+
+  it(
+    "does not upload a result when validation fails (fail-closed for all non-passed outcomes)",
+    async () => {
+      const stateRoot = await mkdtemp(path.join(os.tmpdir(), "genki-orch-state-"));
+      const queue = await mkdtemp(path.join(os.tmpdir(), "genki-orch-queue-"));
+      const repo = await createRepo();
+      await writeFile(path.join(queue, "01.json"), JSON.stringify(task("valfail-task", repo)));
+
+      const engine = new GenkiEngine({ stateRoot });
+      const description = await engine.describeSession({
+        taskDirectory: queue,
+        policy: { ...policy(), maxTasks: 1 }
+      });
+      await engine.activateSession(description.sessionId, description.policyDigest);
+      const coordinator = new LocalCoordinator({ taskDirectory: queue });
+      const host = new ScriptedHost([
+        async (input) => {
+          // Write a value that does NOT satisfy the validation test
+          // (test expects "after" but we write "wrong")
+          await writeFile(path.join(input.workspace, "value.js"), 'export const value = "wrong";\n');
+          return {
+            host: "codex",
+            outcome: "completed",
+            exitCode: 0,
+            usage: null,
+            completedCriteria: [],
+            remainingCriteria: []
+          };
+        }
+      ]);
+
+      const summary = await runContributionSession({
+        engine,
+        coordinator,
+        host,
+        sessionId: description.sessionId,
+        policy: { ...policy(), maxTasks: 1 },
+        policyDigest: description.policyDigest,
+        resolveLocalRepository: (leased) => coordinator.resolveLocalRepository(leased)
+      });
+
+      expect(summary.completed).toBe(0);
+      expect(summary.failed).toBeGreaterThan(0);
+      expect(summary.lastOutcomeCode).toBe("VALIDATION_FAILED");
+
+      const ops = coordinator.listOperations();
+      const results = ops.filter((op) => op.kind === "result");
+      expect(results).toHaveLength(0);
+    },
+    60_000
+  );
 });

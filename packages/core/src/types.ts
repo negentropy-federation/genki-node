@@ -199,6 +199,8 @@ export interface SessionPaths {
   markerPath: string;
   sessionFile: string;
   runsRoot: string;
+  workspacesRoot: string;
+  homesRoot: string;
   agyLogPath: string;
 }
 
@@ -268,6 +270,6 @@ export interface PreparedTaskForHost {
 }
 
 export interface GenericTaskOutcome {
-  code: "DELIVERED" | "POLICY_FROZEN" | "VALIDATION_FAILED";
+  code: "DELIVERED" | "POLICY_FROZEN" | "VALIDATION_FAILED" | "SOURCE_CONTAMINATION";
   passed: boolean;
 }

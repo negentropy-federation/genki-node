@@ -140,6 +140,15 @@ export async function runContributionSession(
         if (hostResult.outcome === "completed") {
           await input.engine.runValidation(prepared.runId);
           const materialized = await input.engine.materializeResult(prepared.runId);
+
+          // Fail-closed: never upload kind:"result" unless outcome.passed is
+          // true. This covers SOURCE_CONTAMINATION, VALIDATION_FAILED,
+          // POLICY_FROZEN, and any future non-pass outcome code.
+          if (!materialized.outcome.passed) {
+            await input.engine.purgeRun(prepared.runId);
+            continue;
+          }
+
           const ack = await input.coordinator.uploadResult({
             sessionId: coordinatorSession.sessionId,
             token: coordinatorSession.token,

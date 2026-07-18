@@ -102,6 +102,26 @@ genki contribute --task-dir /absolute/path/to/tasks --retain-until-verified
 genki cleanup --session <session-id>
 ```
 
+## Source repository isolation
+
+Genki's core isolation promise: **the source repository referenced in a task is never modified**.
+
+All coding work happens in a **disposable clone** created with `git clone --no-local --no-hardlinks`. The clone shares no filesystem objects (no hardlinks, no shared pack files) with the original. Genki checks out the exact base commit in detached HEAD state and all host (Agy / Codex) edits stay inside this throwaway workspace. When the task finishes — success or failure — the workspace is cleaned up. The original repository remains byte-for-byte identical to its pre-session state.
+
+**What this is:**
+- A full independent copy with complete data isolation from the source.
+- Verified by checksum + `git status --porcelain` before/after comparison in the automated smoke test (`scripts/smoke-agy-isolation.sh`).
+
+**What this is not:**
+- A full OS-grade sandbox. The host process runs with a stripped environment but without a container, VM, or seccomp filter. This milestone uses controlled local fixtures and first-party trusted repositories; arbitrary third-party code awaits the outer-sandbox gate.
+
+Pre-run safety checks performed by `inspectRepository()`:
+1. Source must be a clean Git working tree (`git status --porcelain` empty).
+2. No `.gitmodules` (submodules rejected).
+3. No tracked symlinks that escape the repository root.
+
+Run `scripts/smoke-agy-isolation.sh` to verify isolation end-to-end with a real Agy session. The script exits non-zero if the source fixture is mutated.
+
 ## Privacy and security boundary
 
 - Genki does not ask for or persist passwords, cookies, session tokens, OAuth refresh tokens, or provider API keys.

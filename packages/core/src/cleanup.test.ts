@@ -25,7 +25,7 @@ describe("model-free cleanup", () => {
 
     const report = await cleanupTaskRun(session, "run-1");
 
-    expect(report.removedPaths).toEqual([run.root]);
+    expect(report.removedPaths.sort()).toEqual([run.root, run.workspace, run.temporaryHome].sort());
     expect(await exists(run.root)).toBe(false);
     expect(await exists(session.root)).toBe(true);
   });

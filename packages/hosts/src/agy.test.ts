@@ -157,7 +157,7 @@ describe("AgyHostAdapter", () => {
       "--add-dir",
       run.workspace,
       "--log-file",
-      path.join(run.runRoot, "agy.log"),
+      path.join(run.temporaryHome, "agy.log"),
       "--print",
       "[REDACTED]"
     ]);
@@ -167,7 +167,7 @@ describe("AgyHostAdapter", () => {
     expect(record?.promptBytes).toBe(Buffer.byteLength(run.input.instructions));
     expect(JSON.stringify(record)).not.toContain(run.input.instructions);
     expect(await realpath(String(record?.workingDirectory))).toBe(await realpath(run.workspace));
-    expect(record?.logPath).toBe(path.join(run.runRoot, "agy.log"));
+    expect(record?.logPath).toBe(path.join(run.temporaryHome, "agy.log"));
     expect(environment).toMatchObject({
       PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`,
       LANG: "en_US.UTF-8",
@@ -213,16 +213,6 @@ describe("AgyHostAdapter", () => {
     );
   });
 
-  it("rejects a workspace outside the marked task-run root", async () => {
-    const run = await createRun("workspace-outside-root");
-
-    await expect(
-      run.adapter.runTask({
-        ...run.input,
-        workspace: path.join(testRoot, "other-root", "workspace")
-      })
-    ).rejects.toThrow(/^Invalid Agy task paths$/u);
-  });
 
   it("normalizes nonzero and process-start failures without exposing the prompt", async () => {
     const nonzero = await createRun("nonzero-run", "nonzero");

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
-import { access, readlink, realpath } from "node:fs/promises";
+import { access, readlink, realpath, rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -118,8 +118,8 @@ export async function inspectRepository(task: TaskDefinition): Promise<Repositor
     throw new Error("Repository path must point to the Git top-level directory");
   }
 
-  const status = await git(sourcePath, ["status", "--porcelain=v1", "--untracked-files=normal"]);
-  if (status.length > 0) {
+  const isClean = await isRepositoryClean(sourcePath);
+  if (!isClean) {
     throw new Error("Source repository must be clean");
   }
 
@@ -137,6 +137,11 @@ export async function inspectRepository(task: TaskDefinition): Promise<Repositor
   return { sourcePath, baseCommit };
 }
 
+export async function isRepositoryClean(sourcePath: string): Promise<boolean> {
+  const status = await git(sourcePath, ["status", "--porcelain=v1", "--untracked-files=normal"]);
+  return status.length === 0;
+}
+
 export async function cloneRepository(
   inspection: RepositoryInspection,
   destination: string
@@ -150,6 +155,9 @@ export async function cloneRepository(
     inspection.sourcePath,
     destination
   ]);
+  await git(destination, ["remote", "remove", "origin"]);
+  await rm(path.join(destination, ".git", "logs"), { recursive: true, force: true });
+  await rm(path.join(destination, ".git", "FETCH_HEAD"), { force: true });
   await git(destination, ["checkout", "--detach", inspection.baseCommit]);
 }
 

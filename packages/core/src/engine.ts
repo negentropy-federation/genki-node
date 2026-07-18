@@ -9,7 +9,8 @@ import {
   applyCheckpoint,
   buildPatch,
   cloneRepository,
-  inspectRepository
+  inspectRepository,
+  isRepositoryClean
 } from "./repository.js";
 import { persistRetainedCheckpoint, persistRetainedResult } from "./result.js";
 import {
@@ -88,6 +89,7 @@ interface RunRecord {
   taskDigest: string;
   baseCommit: string;
   validation: ValidationSummary | null;
+  sourcePath: string;
 }
 
 interface LocatedRun {
@@ -233,7 +235,8 @@ export class GenkiEngine {
         const attemptId = this.#createId();
         const leaseId = this.#createId();
         const runPaths = await createTaskRunStorage(paths, runId);
-        await writeJsonAtomic(path.join(runPaths.root, "task.json"), task);
+        const safeTask = { ...task, repository: { ...task.repository, path: "/REDACTED" } };
+        await writeJsonAtomic(path.join(runPaths.root, "task.json"), safeTask);
         await cloneRepository(inspection, runPaths.workspace);
         const runRecord: RunRecord = {
           runId,
@@ -248,7 +251,8 @@ export class GenkiEngine {
           hostResult: null,
           taskDigest: sha256Digest({ task, baseCommit: inspection.baseCommit }),
           baseCommit: inspection.baseCommit,
-          validation: null
+          validation: null,
+          sourcePath: inspection.sourcePath
         };
         // Persist provenance before any host process launches so crash recovery
         // can locate the active run without a model conversation.
@@ -315,7 +319,8 @@ export class GenkiEngine {
     const runId = this.#createId();
     const attemptId = this.#createId();
     const runPaths = await createTaskRunStorage(paths, runId);
-    await writeJsonAtomic(path.join(runPaths.root, "task.json"), localTask);
+    const safeTask = { ...localTask, repository: { ...localTask.repository, path: "/REDACTED" } };
+    await writeJsonAtomic(path.join(runPaths.root, "task.json"), safeTask);
     await writeJsonAtomic(path.join(runPaths.root, "leased-task.json"), input.leased);
     await cloneRepository(inspection, runPaths.workspace);
     if (input.predecessor) {
@@ -338,7 +343,8 @@ export class GenkiEngine {
         baseCommit: inspection.baseCommit
       }),
       baseCommit: inspection.baseCommit,
-      validation: null
+      validation: null,
+      sourcePath: inspection.sourcePath
     };
     runRecord.state = transitionTask(runRecord.state, "executing");
     await writeJsonAtomic(runPaths.runFile, runRecord);
@@ -379,8 +385,13 @@ export class GenkiEngine {
       patch.patchBytes > task.policy.maxPatchBytes ||
       patch.patchBytes > sessionRecord.policy.maxPatchBytes;
 
+    const isClean = await isRepositoryClean(located.record.sourcePath);
+
     let outcome: GenericTaskOutcome;
-    if (exceedsPolicy) {
+    if (!isClean) {
+      located.record.state = transitionTask(located.record.state, "failed");
+      outcome = { code: "SOURCE_CONTAMINATION", passed: false };
+    } else if (exceedsPolicy) {
       located.record.state = transitionTask(located.record.state, "frozen");
       outcome = { code: "POLICY_FROZEN", passed: false };
     } else if (!located.record.validation.passed) {
@@ -519,6 +530,16 @@ export class GenkiEngine {
       patch.patchBytes > task.policy.maxPatchBytes ||
       patch.patchBytes > sessionRecord.policy.maxPatchBytes;
 
+    const isClean = await isRepositoryClean(located.record.sourcePath);
+    if (!isClean) {
+      located.record.state = transitionTask(located.record.state, "frozen");
+      await writeJsonAtomic(located.run.runFile, located.record);
+      sessionRecord.failed += 1;
+      sessionRecord.lastOutcomeCode = "SOURCE_CONTAMINATION";
+      await writeJsonAtomic(sessionPaths.sessionFile, sessionRecord);
+      throw new Error("Checkpoint rejected due to source repository contamination");
+    }
+
     if (exceedsPolicy) {
       located.record.state = transitionTask(located.record.state, "frozen");
       await writeJsonAtomic(located.run.runFile, located.record);
@@ -580,8 +601,13 @@ export class GenkiEngine {
       patch.patchBytes > task.policy.maxPatchBytes ||
       patch.patchBytes > sessionRecord.policy.maxPatchBytes;
 
+    const isClean = await isRepositoryClean(located.record.sourcePath);
+
     let outcome: GenericTaskOutcome;
-    if (exceedsPolicy) {
+    if (!isClean) {
+      located.record.state = transitionTask(located.record.state, "failed");
+      outcome = { code: "SOURCE_CONTAMINATION", passed: false };
+    } else if (exceedsPolicy) {
       located.record.state = transitionTask(located.record.state, "frozen");
       outcome = { code: "POLICY_FROZEN", passed: false };
     } else if (!located.record.validation.passed) {
