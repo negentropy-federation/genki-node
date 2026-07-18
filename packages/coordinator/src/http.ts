@@ -11,19 +11,25 @@ import type {
   LeaseStatus,
   OpenSessionInput,
   ResultUpload,
-  UploadAck
+  UploadAck,
+  SubmissionStatus,
+  StructuredError
 } from "./types.js";
+import { CoordinatorError } from "./types.js";
+import type { PartialCheckpoint } from "../../core/src/types.js";
 
 const uploadAckSchema = z.strictObject({
-  accepted: z.boolean(),
   operationId: z.string().min(1),
-  reason: z.enum([
-    "accepted",
-    "duplicate",
-    "stale_lease",
-    "session_closed",
-    "policy_rejected"
-  ])
+  submissionId: z.string().min(1),
+  receiptStatus: z.enum(["received"]),
+  verificationStatus: z.enum(["pending", "verified", "rejected"]),
+  duplicate: z.boolean()
+});
+
+const submissionStatusSchema = z.strictObject({
+  submissionId: z.string().min(1),
+  receiptStatus: z.enum(["received"]),
+  verificationStatus: z.enum(["pending", "verified", "rejected"])
 });
 
 const sessionSchema = z.strictObject({
@@ -100,7 +106,7 @@ export class HttpCoordinatorClient implements CoordinatorClient {
       endpoint: "open_session",
       method: "POST",
       path: "/v1/contribution-sessions",
-      idempotencyKey: `open:${input.policyDigest}:${input.policy.host}`,
+      idempotencyKey: crypto.randomUUID(),
       body: input
     });
     return sessionSchema.parse(body);
@@ -172,6 +178,30 @@ export class HttpCoordinatorClient implements CoordinatorClient {
     return uploadAckSchema.parse(body);
   }
 
+  async getSubmission(submissionId: string, session: CoordinatorSession): Promise<SubmissionStatus> {
+    const body = await this.#requestJson({
+      endpoint: "get_submission",
+      method: "GET",
+      path: `/v1/submissions/${encodeURIComponent(submissionId)}`,
+      token: session.token,
+      idempotencyKey: "",
+      body: undefined
+    });
+    return submissionStatusSchema.parse(body);
+  }
+
+  async downloadCheckpoint(checkpointId: string, session: CoordinatorSession): Promise<PartialCheckpoint> {
+    const body = await this.#requestJson({
+      endpoint: "download_checkpoint",
+      method: "GET",
+      path: `/v1/checkpoints/${encodeURIComponent(checkpointId)}`,
+      token: session.token,
+      idempotencyKey: "",
+      body: undefined
+    });
+    return body as PartialCheckpoint; // We trust the coordinator's checkpoint payload format
+  }
+
   async closeSession(input: CloseSessionInput): Promise<void> {
     await this.#requestJson({
       endpoint: "close_session",
@@ -236,12 +266,15 @@ export class HttpCoordinatorClient implements CoordinatorClient {
 
     let response: Response;
     try {
-      response = await this.#fetch(new URL(input.path, this.#baseUrl), {
+      const fetchInit: RequestInit = {
         method: input.method,
         headers,
-        body: JSON.stringify(input.body),
         signal: AbortSignal.timeout(this.#requestTimeoutMs)
-      });
+      };
+      if (input.body !== undefined) {
+        fetchInit.body = JSON.stringify(input.body);
+      }
+      response = await this.#fetch(new URL(input.path, this.#baseUrl), fetchInit);
     } catch {
       throw new HttpCoordinatorError(input.endpoint, null, "network_error");
     }
@@ -251,6 +284,16 @@ export class HttpCoordinatorClient implements CoordinatorClient {
       throw new HttpCoordinatorError(input.endpoint, response.status, "response_too_large");
     }
     if (!response.ok) {
+      if (raw.byteLength > 0) {
+        try {
+          const body = JSON.parse(new TextDecoder().decode(raw));
+          if (typeof body === "object" && body !== null && "error" in body && "message" in body) {
+            throw new CoordinatorError(body as StructuredError, response.status);
+          }
+        } catch (e) {
+          if (e instanceof CoordinatorError) throw e;
+        }
+      }
       throw new HttpCoordinatorError(input.endpoint, response.status, "http_error");
     }
     if (raw.byteLength === 0) {

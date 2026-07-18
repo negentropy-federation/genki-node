@@ -191,7 +191,6 @@ describe("parseLeasedTask", () => {
     expect(() =>
       parseLeasedTask({
         ...leasedTask,
-        // @ts-expect-error Testing invalid repository class
         project: { ...leasedTask.project, repositoryClass: "private" }
       })
     ).toThrow();

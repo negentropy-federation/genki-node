@@ -114,7 +114,7 @@ describe("LocalCoordinator", () => {
     const leased = await coordinator.leaseTask(session);
     expect(leased).not.toBeNull();
 
-    const stale = await coordinator.uploadResult({
+    await expect(coordinator.uploadResult({
       sessionId: session.sessionId,
       token: session.token,
       leaseId: leased!.leaseId,
@@ -134,12 +134,7 @@ describe("LocalCoordinator", () => {
       completedCriteria: [],
       remainingCriteria: [],
       kind: "result"
-    });
-    expect(stale).toEqual({
-      accepted: false,
-      operationId: "op-stale",
-      reason: "stale_lease"
-    });
+    })).rejects.toThrow("Stale lease");
 
     const first = await coordinator.uploadCheckpoint({
       sessionId: session.sessionId,
@@ -157,8 +152,8 @@ describe("LocalCoordinator", () => {
       operationId: "op-cp",
       checkpoint: checkpoint(baseCommit)
     });
-    expect(first.reason).toBe("accepted");
-    expect(duplicate.reason).toBe("duplicate");
+    expect(first.receiptStatus).toBe("received");
+    expect(duplicate.duplicate).toBe(true);
     expect(coordinator.getAcceptedCheckpoint("coord-task")?.patchDigest).toBe("a".repeat(64));
   });
 

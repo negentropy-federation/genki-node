@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 
 import type { CoordinatorClient, LocalCoordinator } from "../../coordinator/src/index.js";
+import { CoordinatorError } from "../../coordinator/src/types.js";
 import type { GenkiEngine } from "../../core/src/engine.js";
 import type {
   GenericSessionStatus,
@@ -20,7 +21,7 @@ export interface ContributionSessionInput {
   policy: SessionPolicy;
   policyDigest: string;
   resolveLocalRepository: (task: LeasedTask) => string;
-  getAcceptedCheckpoint?: (taskId: string) => PartialCheckpoint | null;
+
   abortSignal?: AbortSignal;
   onStatus?: (status: GenericSessionStatus) => void;
   createOperationId?: (parts: string[]) => string;
@@ -38,15 +39,6 @@ function operationId(parts: string[]): string {
   return createHash("sha256").update(parts.join(":")).digest("hex");
 }
 
-function emptyPatchDigest(): string {
-  return createHash("sha256").update("").digest("hex");
-}
-
-function isLocalCoordinator(
-  coordinator: CoordinatorClient
-): coordinator is LocalCoordinator {
-  return typeof (coordinator as LocalCoordinator).resolveLocalRepository === "function";
-}
 
 export async function runContributionSession(
   input: ContributionSessionInput
@@ -125,12 +117,19 @@ export async function runContributionSession(
 
       try {
         const localRepositoryPath = input.resolveLocalRepository(leased);
-        const predecessor =
-          input.getAcceptedCheckpoint?.(leased.taskId) ??
-          (isLocalCoordinator(input.coordinator)
-            ? input.coordinator.getAcceptedCheckpoint(leased.taskId)
-            : null);
-
+        let predecessor: PartialCheckpoint | null = null;
+        if (leased.predecessorCheckpoint) {
+          predecessor = await input.coordinator.downloadCheckpoint(
+            leased.predecessorCheckpoint.checkpointId,
+            coordinatorSession
+          );
+          if (
+            predecessor.baseCommit !== leased.predecessorCheckpoint.baseCommit ||
+            predecessor.patchDigest !== leased.predecessorCheckpoint.patchDigest
+          ) {
+            throw new Error("Downloaded checkpoint does not match advertised reference");
+          }
+        }
         const prepared = await input.engine.prepareLeasedTask({
           sessionId: input.sessionId,
           leased,
@@ -167,37 +166,45 @@ export async function runContributionSession(
             continue;
           }
 
-          const ack = await input.coordinator.uploadResult({
-            sessionId: coordinatorSession.sessionId,
-            token: coordinatorSession.token,
-            leaseId: leased.leaseId,
-            leaseGeneration: leased.leaseGeneration,
-            operationId: createOpId([
-              coordinatorSession.sessionId,
-              leased.taskId,
-              prepared.attemptId,
-              String(leased.leaseGeneration),
-              "result"
-            ]),
-            taskId: materialized.taskId,
-            taskRevision: materialized.taskRevision,
-            attemptId: materialized.attemptId,
-            baseCommit: materialized.baseCommit,
-            patch: materialized.patch.patch,
-            patchDigest: materialized.patch.patchDigest,
-            changedFiles: materialized.patch.changedFiles,
-            validation: materialized.boundedValidation,
-            host: hostResult.host,
-            hostOutcome: hostResult.outcome,
-            usage: hostResult.usage,
-            completedCriteria: hostResult.completedCriteria,
-            remainingCriteria: hostResult.remainingCriteria,
-            kind: "result"
-          });
-          if (ack.reason === "stale_lease") {
-            // Discard local result; do not retry as a new generation.
+          try {
+            const ack = await input.coordinator.uploadResult({
+              sessionId: coordinatorSession.sessionId,
+              token: coordinatorSession.token,
+              leaseId: leased.leaseId,
+              leaseGeneration: leased.leaseGeneration,
+              operationId: createOpId([
+                coordinatorSession.sessionId,
+                leased.taskId,
+                prepared.attemptId,
+                String(leased.leaseGeneration),
+                "result"
+              ]),
+              taskId: materialized.taskId,
+              taskRevision: materialized.taskRevision,
+              attemptId: materialized.attemptId,
+              baseCommit: materialized.baseCommit,
+              patch: materialized.patch.patch,
+              patchDigest: materialized.patch.patchDigest,
+              changedFiles: materialized.patch.changedFiles,
+              validation: materialized.boundedValidation,
+              host: hostResult.host,
+              hostOutcome: hostResult.outcome,
+              usage: hostResult.usage,
+              completedCriteria: hostResult.completedCriteria,
+              remainingCriteria: hostResult.remainingCriteria,
+              kind: "result"
+            });
+            if (ack.receiptStatus === "received" && !input.policy.retainUntilVerified) {
+              await input.engine.purgeRun(prepared.runId);
+            }
+          } catch (e) {
+            if (e instanceof CoordinatorError && e.payload.error === "stale_lease") {
+              // Discard local result; do not retry as a new generation.
+              await input.engine.purgeRun(prepared.runId);
+            } else {
+              throw e;
+            }
           }
-          await input.engine.purgeRun(prepared.runId);
           continue;
         }
 
@@ -210,7 +217,37 @@ export async function runContributionSession(
             await input.engine.purgeRun(prepared.runId);
             continue;
           }
-          const ack = await input.coordinator.uploadCheckpoint({
+          try {
+            const ack = await input.coordinator.uploadCheckpoint({
+              sessionId: coordinatorSession.sessionId,
+              token: coordinatorSession.token,
+              leaseId: leased.leaseId,
+              leaseGeneration: leased.leaseGeneration,
+              operationId: createOpId([
+                coordinatorSession.sessionId,
+                leased.taskId,
+                prepared.attemptId,
+                String(leased.leaseGeneration),
+                "checkpoint"
+              ]),
+              checkpoint
+            });
+            if (ack.receiptStatus === "received" && !input.policy.retainUntilVerified) {
+              await input.engine.purgeRun(prepared.runId);
+            }
+          } catch (e) {
+            if (e instanceof CoordinatorError && e.payload.error === "stale_lease") {
+              // Drop the checkpoint for the expired generation.
+              await input.engine.purgeRun(prepared.runId);
+            } else {
+              throw e;
+            }
+          }
+          continue;
+        }
+
+        try {
+          const ack = await input.coordinator.uploadResult({
             sessionId: coordinatorSession.sessionId,
             token: coordinatorSession.token,
             leaseId: leased.leaseId,
@@ -220,49 +257,38 @@ export async function runContributionSession(
               leased.taskId,
               prepared.attemptId,
               String(leased.leaseGeneration),
-              "checkpoint"
+              "attempt"
             ]),
-            checkpoint
+            taskId: prepared.taskId,
+            taskRevision: prepared.taskRevision,
+            attemptId: prepared.attemptId,
+            baseCommit: prepared.baseCommit,
+            patch: "",
+            patchDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            changedFiles: [],
+            validation: null,
+            host: hostResult.host,
+            hostOutcome: hostResult.outcome,
+            usage: hostResult.usage,
+            completedCriteria: hostResult.completedCriteria,
+            remainingCriteria: hostResult.remainingCriteria,
+            kind: "attempt_evidence"
           });
-          if (ack.reason === "stale_lease") {
-            // Drop the checkpoint for the expired generation.
+          if (ack.receiptStatus === "received") {
+            await input.engine.noteSessionOutcome(input.sessionId, {
+              failed: true,
+              lastOutcomeCode: hostResult.outcome.toUpperCase()
+            });
+            if (!input.policy.retainUntilVerified) {
+              await input.engine.purgeRun(prepared.runId);
+            }
           }
-          await input.engine.purgeRun(prepared.runId);
-          continue;
-        }
-
-        const ack = await input.coordinator.uploadResult({
-          sessionId: coordinatorSession.sessionId,
-          token: coordinatorSession.token,
-          leaseId: leased.leaseId,
-          leaseGeneration: leased.leaseGeneration,
-          operationId: createOpId([
-            coordinatorSession.sessionId,
-            leased.taskId,
-            prepared.attemptId,
-            String(leased.leaseGeneration),
-            "attempt"
-          ]),
-          taskId: prepared.taskId,
-          taskRevision: prepared.taskRevision,
-          attemptId: prepared.attemptId,
-          baseCommit: prepared.baseCommit,
-          patch: "",
-          patchDigest: emptyPatchDigest(),
-          changedFiles: [],
-          validation: null,
-          host: hostResult.host,
-          hostOutcome: hostResult.outcome,
-          usage: hostResult.usage,
-          completedCriteria: hostResult.completedCriteria,
-          remainingCriteria: hostResult.remainingCriteria,
-          kind: "attempt_evidence"
-        });
-        if (ack.accepted || ack.reason === "duplicate") {
-          await input.engine.noteSessionOutcome(input.sessionId, {
-            failed: true,
-            lastOutcomeCode: hostResult.outcome.toUpperCase()
-          });
+        } catch (e) {
+          if (e instanceof CoordinatorError && e.payload.error === "stale_lease") {
+            await input.engine.purgeRun(prepared.runId);
+          } else {
+            throw e;
+          }
         }
         await input.engine.purgeRun(prepared.runId);
       } catch {

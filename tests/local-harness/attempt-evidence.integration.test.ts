@@ -148,7 +148,7 @@ describe("attempt evidence", () => {
         remainingCriteria: [],
         kind: "attempt_evidence"
       });
-      expect(duplicate.reason).toBe("duplicate");
+      expect(duplicate.duplicate).toBe(true);
       expect(coordinator.listAttemptAwards()).toHaveLength(1);
       expect(coordinator.listAttemptAwards()[0]?.award).toBe(1);
       expect(coordinator.listAttemptAwards()[0]?.award).toBeLessThanOrEqual(100 * 0.01);

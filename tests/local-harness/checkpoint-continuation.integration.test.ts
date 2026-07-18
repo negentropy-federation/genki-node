@@ -153,8 +153,7 @@ describe("checkpoint continuation", () => {
         sessionId: description2.sessionId,
         policy: codexPolicy,
         policyDigest: description2.policyDigest,
-        resolveLocalRepository: (leased) => coordinator.resolveLocalRepository(leased),
-        getAcceptedCheckpoint: (taskId) => coordinator.getAcceptedCheckpoint(taskId)
+        resolveLocalRepository: (leased) => coordinator.resolveLocalRepository(leased)
       });
 
       const results = coordinator.listOperations().filter((op) => op.kind === "result");

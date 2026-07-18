@@ -91,7 +91,7 @@ describe("HttpCoordinatorClient", () => {
         createdAt: new Date().toISOString()
       }
     });
-    expect(checkpointAck.reason).toBe("accepted");
+    expect(checkpointAck.receiptStatus).toBe("received");
 
     const resultAck = await client.uploadResult({
       sessionId: session.sessionId,
@@ -114,7 +114,7 @@ describe("HttpCoordinatorClient", () => {
       remainingCriteria: [],
       kind: "result"
     });
-    expect(resultAck.reason).toBe("accepted");
+    expect(resultAck.receiptStatus).toBe("received");
 
     await client.closeSession({ sessionId: session.sessionId, token: session.token });
 

@@ -90,9 +90,33 @@ export interface CloseSessionInput {
 }
 
 export interface UploadAck {
-  accepted: boolean;
   operationId: string;
-  reason: "accepted" | "duplicate" | "stale_lease" | "session_closed" | "policy_rejected";
+  submissionId: string;
+  receiptStatus: "received";
+  verificationStatus: "pending" | "verified" | "rejected";
+  duplicate: boolean;
+}
+
+export interface SubmissionStatus {
+  submissionId: string;
+  receiptStatus: "received";
+  verificationStatus: "pending" | "verified" | "rejected";
+}
+
+export interface StructuredError {
+  error: string;
+  message: string;
+  requestId: string;
+}
+
+export class CoordinatorError extends Error {
+  constructor(
+    public readonly payload: StructuredError,
+    public readonly statusCode: number
+  ) {
+    super(`Coordinator error ${payload.error}: ${payload.message}`);
+    this.name = "CoordinatorError";
+  }
 }
 
 export interface CoordinatorClient {
@@ -101,5 +125,7 @@ export interface CoordinatorClient {
   heartbeat(input: LeaseHeartbeat): Promise<LeaseStatus>;
   uploadCheckpoint(input: CheckpointUpload): Promise<UploadAck>;
   uploadResult(input: ResultUpload): Promise<UploadAck>;
+  getSubmission(submissionId: string, session: CoordinatorSession): Promise<SubmissionStatus>;
+  downloadCheckpoint(checkpointId: string, session: CoordinatorSession): Promise<PartialCheckpoint>;
   closeSession(input: CloseSessionInput): Promise<void>;
 }

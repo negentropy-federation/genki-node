@@ -19,8 +19,10 @@ import type {
   LeaseStatus,
   OpenSessionInput,
   ResultUpload,
-  UploadAck
+  UploadAck,
+  SubmissionStatus
 } from "./types.js";
+import { CoordinatorError } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -199,19 +201,19 @@ export class LocalCoordinator implements CoordinatorClient {
       token: input.token
     });
     if (session.closed) {
-      return { accepted: false, operationId: input.operationId, reason: "session_closed" };
+      throw new CoordinatorError({ error: "session_closed", message: "Session closed", requestId: "" }, 403);
     }
     const existing = this.#operations.get(input.operationId);
     if (existing !== undefined) {
-      return { accepted: true, operationId: input.operationId, reason: "duplicate" };
+      return { operationId: input.operationId, submissionId: input.operationId, receiptStatus: "received", verificationStatus: "pending", duplicate: true };
     }
     this.#expireActiveLeaseIfNeeded();
     if (!this.#leaseMatches(input.leaseId, input.leaseGeneration, input.sessionId)) {
-      return { accepted: false, operationId: input.operationId, reason: "stale_lease" };
+      throw new CoordinatorError({ error: "stale_lease", message: "Stale lease", requestId: "" }, 409);
     }
     const task = this.#queue[this.#activeLease!.taskIndex];
     if (task === undefined) {
-      return { accepted: false, operationId: input.operationId, reason: "policy_rejected" };
+      throw new CoordinatorError({ error: "policy_rejected", message: "Task unavailable", requestId: "" }, 422);
     }
     task.acceptedCheckpoint = input.checkpoint;
     this.#operations.set(input.operationId, {
@@ -222,7 +224,7 @@ export class LocalCoordinator implements CoordinatorClient {
       payload: input
     });
     this.#activeLease = null;
-    return { accepted: true, operationId: input.operationId, reason: "accepted" };
+    return { operationId: input.operationId, submissionId: input.operationId, receiptStatus: "received", verificationStatus: "pending", duplicate: false };
   }
 
   async uploadResult(input: ResultUpload): Promise<UploadAck> {
@@ -231,19 +233,19 @@ export class LocalCoordinator implements CoordinatorClient {
       token: input.token
     });
     if (session.closed) {
-      return { accepted: false, operationId: input.operationId, reason: "session_closed" };
+      throw new CoordinatorError({ error: "session_closed", message: "Session closed", requestId: "" }, 403);
     }
     const existing = this.#operations.get(input.operationId);
     if (existing !== undefined) {
-      return { accepted: true, operationId: input.operationId, reason: "duplicate" };
+      return { operationId: input.operationId, submissionId: input.operationId, receiptStatus: "received", verificationStatus: "pending", duplicate: true };
     }
     this.#expireActiveLeaseIfNeeded();
     if (!this.#leaseMatches(input.leaseId, input.leaseGeneration, input.sessionId)) {
-      return { accepted: false, operationId: input.operationId, reason: "stale_lease" };
+      throw new CoordinatorError({ error: "stale_lease", message: "Stale lease", requestId: "" }, 409);
     }
     const task = this.#queue[this.#activeLease!.taskIndex];
     if (task === undefined) {
-      return { accepted: false, operationId: input.operationId, reason: "policy_rejected" };
+      throw new CoordinatorError({ error: "policy_rejected", message: "Task unavailable", requestId: "" }, 422);
     }
 
     if (input.kind === "attempt_evidence") {
@@ -262,7 +264,25 @@ export class LocalCoordinator implements CoordinatorClient {
       payload: input
     });
     this.#activeLease = null;
-    return { accepted: true, operationId: input.operationId, reason: "accepted" };
+    return { operationId: input.operationId, submissionId: input.operationId, receiptStatus: "received", verificationStatus: "pending", duplicate: false };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async getSubmission(submissionId: string, _session: CoordinatorSession): Promise<SubmissionStatus> {
+    const existing = this.#operations.get(submissionId);
+    if (existing === undefined) {
+      throw new CoordinatorError({ error: "not_found", message: "Not found", requestId: "" }, 404);
+    }
+    return {
+      submissionId,
+      receiptStatus: "received",
+      verificationStatus: "pending"
+    };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async downloadCheckpoint(_checkpointId: string, _session: CoordinatorSession): Promise<PartialCheckpoint> {
+    throw new CoordinatorError({ error: "not_implemented", message: "Not implemented in local mock", requestId: "" }, 501);
   }
 
   async closeSession(input: CloseSessionInput): Promise<void> {

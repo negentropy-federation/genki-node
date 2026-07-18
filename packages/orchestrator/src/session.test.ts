@@ -6,8 +6,9 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 import { LocalCoordinator } from "../../coordinator/src/local.js";
+import type { OpenSessionInput } from "../../coordinator/src/types.js";
 import { GenkiEngine } from "../../core/src/engine.js";
-import type { HostRunResult, SessionPolicy, TaskDefinition } from "../../core/src/types.js";
+import type { HostRunResult, SessionPolicy, TaskDefinition, PartialCheckpoint } from "../../core/src/types.js";
 import type { HostAdapter, HostRunInput } from "../../hosts/src/types.js";
 import { runContributionSession } from "./session.js";
 
@@ -394,7 +395,7 @@ describe("runContributionSession", () => {
   it("derives the coordinator policy snapshot and canonical digest correctly", async () => {
     const p = policy();
     const coordinator = {
-      openSession: async (input: any) => {
+      openSession: async (input: OpenSessionInput) => {
         expect(input.policyDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
         expect(input.policy).toEqual({
           schemaVersion: "1",
@@ -414,8 +415,10 @@ describe("runContributionSession", () => {
       },
       leaseTask: async () => null,
       heartbeat: async () => ({ leaseId: "lease-1", leaseGeneration: 1, active: true, expiresAt: "2099-01-01T00:00:00Z" }),
-      uploadCheckpoint: async () => ({ accepted: true, operationId: "op", reason: "accepted" as const }),
-      uploadResult: async () => ({ accepted: true, operationId: "op", reason: "accepted" as const }),
+      uploadCheckpoint: async () => ({ operationId: "op", submissionId: "op", receiptStatus: "received" as const, verificationStatus: "pending" as const, duplicate: false }),
+      uploadResult: async () => ({ operationId: "op", submissionId: "op", receiptStatus: "received" as const, verificationStatus: "pending" as const, duplicate: false }),
+      getSubmission: async () => ({ submissionId: "op", receiptStatus: "received" as const, verificationStatus: "pending" as const }),
+      downloadCheckpoint: async () => ({} as unknown as PartialCheckpoint),
       closeSession: async () => {}
     };
 
@@ -427,7 +430,7 @@ describe("runContributionSession", () => {
           remainingRuntimeSeconds: 0,
           tasksCompleted: 0
         })
-      } as any,
+      } as unknown as GenkiEngine,
       coordinator,
       host: new ScriptedHost([]),
       sessionId: "session-1",

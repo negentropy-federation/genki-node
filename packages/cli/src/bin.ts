@@ -128,10 +128,6 @@ async function run(): Promise<number> {
             );
           }
         };
-        if (coordinator instanceof LocalCoordinator) {
-          sessionInput.getAcceptedCheckpoint = (taskId) =>
-            coordinator.getAcceptedCheckpoint(taskId);
-        }
         const summary = await runContributionSession(sessionInput);
 
         if (!command.policy.retainUntilVerified) {

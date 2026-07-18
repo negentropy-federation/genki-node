@@ -71,18 +71,22 @@ export async function startFakeCoordinatorServer(task: LeasedTask | null): Promi
 
     if (method === "POST" && url.startsWith("/v1/leases/") && url.endsWith("/checkpoints")) {
       writeJson(res, 200, {
-        accepted: true,
         operationId: (body as { operationId?: string })?.operationId ?? "op",
-        reason: "accepted"
+        submissionId: (body as { operationId?: string })?.operationId ?? "op",
+        receiptStatus: "received",
+        verificationStatus: "pending",
+        duplicate: false
       });
       return;
     }
 
     if (method === "POST" && url.startsWith("/v1/leases/") && url.endsWith("/results")) {
       writeJson(res, 200, {
-        accepted: true,
         operationId: (body as { operationId?: string })?.operationId ?? "op",
-        reason: "accepted"
+        submissionId: (body as { operationId?: string })?.operationId ?? "op",
+        receiptStatus: "received",
+        verificationStatus: "pending",
+        duplicate: false
       });
       return;
     }
