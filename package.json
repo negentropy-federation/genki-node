@@ -23,7 +23,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
+    "test": "node scripts/test-wrapper.js",
     "lint": "eslint .",
     "check": "npm run lint && npm run typecheck && npm test && npm run build"
   },

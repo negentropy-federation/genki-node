@@ -1,6 +1,7 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 
-import { parseLeasedTask } from "../../core/src/schema.js";
+import { parseLeasedTask, parsePartialCheckpoint } from "../../core/src/schema.js";
 import type { LeasedTask } from "../../core/src/types.js";
 import type {
   CheckpointUpload,
@@ -199,7 +200,15 @@ export class HttpCoordinatorClient implements CoordinatorClient {
       idempotencyKey: "",
       body: undefined
     });
-    return body as PartialCheckpoint; // We trust the coordinator's checkpoint payload format
+    const checkpoint = parsePartialCheckpoint(body);
+    const computed = createHash("sha256").update(checkpoint.patch, "utf8").digest("hex");
+    const expected = checkpoint.patchDigest.startsWith("sha256:")
+      ? checkpoint.patchDigest.substring(7)
+      : checkpoint.patchDigest;
+    if (computed !== expected) {
+      throw new Error("Checkpoint patch digest mismatch");
+    }
+    return checkpoint;
   }
 
   async closeSession(input: CloseSessionInput): Promise<void> {

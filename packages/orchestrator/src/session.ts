@@ -63,7 +63,7 @@ export async function runContributionSession(
     maxChangedFiles: input.policy.maxChangedFiles,
     maxPatchBytes: input.policy.maxPatchBytes,
     allowedExecutables: input.policy.allowedExecutables,
-    allowedRepositoryClasses: ["public", "first_party_private"] as ("public" | "first_party_private")[],
+    allowedRepositoryClasses: input.policy.allowedRepositoryClasses,
     host: input.policy.host,
     executionNetwork: "none" as const
   };

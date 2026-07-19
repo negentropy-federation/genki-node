@@ -407,7 +407,7 @@ describe("runContributionSession", () => {
           maxChangedFiles: p.maxChangedFiles,
           maxPatchBytes: p.maxPatchBytes,
           allowedExecutables: p.allowedExecutables,
-          allowedRepositoryClasses: ["public", "first_party_private"],
+          allowedRepositoryClasses: p.allowedRepositoryClasses,
           host: p.host,
           executionNetwork: "none"
         });
@@ -438,6 +438,36 @@ describe("runContributionSession", () => {
       policy: p,
       policyDigest: "local-digest-ignored",
       acquireRepository: async () => "/ignored"
+    });
+  });
+  it("never advertises or accepts first_party_private for public-only policy", async () => {
+    const p = policy();
+    // Override policy to be strictly public
+    p.allowedRepositoryClasses = ["public"];
+    const coordinator = {
+      openSession: async (input: OpenSessionInput) => {
+        expect(input.policy.allowedRepositoryClasses).toEqual(["public"]);
+        expect(input.policy.allowedRepositoryClasses).not.toContain("first_party_private");
+        return { sessionId: "coord-session", token: "token", expiresAt: "2099-01-01T00:00:00Z" };
+      },
+      leaseTask: async () => null,
+      heartbeat: async () => ({ leaseId: "lease-1", leaseGeneration: 1, active: true, expiresAt: "2099-01-01T00:00:00Z" }),
+      uploadCheckpoint: async () => ({ operationId: "op", submissionId: "op", receiptStatus: "received" as const, verificationStatus: "pending" as const, duplicate: false }),
+      uploadResult: async () => ({ operationId: "op", submissionId: "op", receiptStatus: "received" as const, verificationStatus: "pending" as const, duplicate: false }),
+      getSubmission: async () => ({ submissionId: "op", receiptStatus: "received" as const, verificationStatus: "pending" as const }),
+      downloadCheckpoint: async () => ({} as unknown as PartialCheckpoint),
+      closeSession: async () => {}
+    };
+
+    await runContributionSession({
+      engine: {
+        sessionStatus: async () => ({ state: "inactive", elapsedRuntimeSeconds: 0, retainedCheckpoints: [] }),
+        fetchTask: async () => ({ result: { status: "empty" }, artifacts: [] })
+      },
+      coordinator,
+      policy: p,
+      contributorClaim: { displayName: null, slogan: null, email: null },
+      runAttemptId: "run-id"
     });
   });
 });

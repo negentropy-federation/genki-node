@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 
 import type { LeasedTask } from "../../packages/core/src/types.js";
 
@@ -93,6 +93,33 @@ export async function startFakeCoordinatorServer(task: LeasedTask | null): Promi
 
     if (method === "POST" && url === `/v1/contribution-sessions/${sessionId}/close`) {
       writeJson(res, 200, {});
+      return;
+    }
+
+    if (method === "GET" && url.startsWith("/v1/checkpoints/")) {
+      const checkpointId = url.split("/")[3];
+      const patch = "diff";
+      const digest = checkpointId === "malformed-checkpoint" 
+        ? "0000000000000000000000000000000000000000000000000000000000000000"
+        : createHash("sha256").update(patch).digest("hex");
+      writeJson(res, 200, {
+        schemaVersion: "1",
+        taskId: "parser-fix",
+        taskRevision: 1,
+        attemptId: "attempt-1",
+        leaseId: "lease-1",
+        leaseGeneration: 1,
+        baseCommit: "0123456789012345678901234567890123456789",
+        patch: patch,
+        patchDigest: digest,
+        changedFiles: ["parser.ts"],
+        validation: null,
+        host: "codex",
+        hostOutcome: "completed",
+        completedCriteria: [],
+        remainingCriteria: [],
+        createdAt: new Date().toISOString()
+      });
       return;
     }
 

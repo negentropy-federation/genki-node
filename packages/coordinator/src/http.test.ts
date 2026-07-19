@@ -136,4 +136,19 @@ describe("HttpCoordinatorClient", () => {
     );
     expect(() => new HttpCoordinatorClient({ baseUrl: "https://example.com" })).not.toThrow();
   });
+
+  it("can download and verify a checkpoint", async () => {
+    const server = await startFakeCoordinatorServer(leasedTask);
+    servers.push(server);
+    const client = new HttpCoordinatorClient({ baseUrl: server.baseUrl });
+
+    const session = { sessionId: "sess-1", token: "token-1", expiresAt: "" };
+    
+    const cp = await client.downloadCheckpoint("checkpoint-1", session);
+    expect(cp.patch).toBe("diff");
+
+    await expect(client.downloadCheckpoint("malformed-checkpoint", session)).rejects.toThrow(
+      "Checkpoint patch digest mismatch"
+    );
+  });
 });
