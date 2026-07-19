@@ -23,6 +23,7 @@ const validPolicy: SessionPolicy = {
   maxChangedFiles: 20,
   maxPatchBytes: 200_000,
   allowedExecutables: ["npm", "node"],
+  allowedRepositoryClasses: ["public"],
   host: "agy",
   model: null,
   retainUntilVerified: false

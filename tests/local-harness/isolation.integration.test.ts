@@ -72,6 +72,7 @@ describe("source repository isolation", () => {
       maxChangedFiles: 5,
       maxPatchBytes: 10_000,
       allowedExecutables: ["node"],
+  allowedRepositoryClasses: ["public"],
       host: "agy",
       model: null,
       retainUntilVerified: true

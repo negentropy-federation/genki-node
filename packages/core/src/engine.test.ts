@@ -52,6 +52,7 @@ function policy(retainUntilVerified = false): SessionPolicy {
     maxChangedFiles: 20,
     maxPatchBytes: 200_000,
     allowedExecutables: ["node"],
+  allowedRepositoryClasses: ["public"],
     host: "agy",
     model: null,
     retainUntilVerified

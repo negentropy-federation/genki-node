@@ -104,11 +104,10 @@ async function run(): Promise<number> {
           sessionId: description.sessionId,
           policy: command.policy,
           policyDigest: description.policyDigest,
-          resolveLocalRepository: (task: LeasedTask) => {
+          acquireRepository: async (task: LeasedTask, policy) => {
             if (!(coordinator instanceof LocalCoordinator)) {
-              throw new Error(
-                "Remote coordinator tasks require a local repository resolver; use --coordinator local for fixtures"
-              );
+              const { acquireRepository } = await import("../../core/src/repository-source.js");
+              return await acquireRepository(task, policy, path.join(root, "repositories"));
             }
             return coordinator.resolveLocalRepository(task);
           },

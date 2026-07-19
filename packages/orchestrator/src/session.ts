@@ -20,7 +20,7 @@ export interface ContributionSessionInput {
   sessionId: string;
   policy: SessionPolicy;
   policyDigest: string;
-  resolveLocalRepository: (task: LeasedTask) => string;
+  acquireRepository: (task: LeasedTask, policy: SessionPolicy) => Promise<string>;
 
   abortSignal?: AbortSignal;
   onStatus?: (status: GenericSessionStatus) => void;
@@ -116,7 +116,7 @@ export async function runContributionSession(
       }, heartbeatMs);
 
       try {
-        const localRepositoryPath = input.resolveLocalRepository(leased);
+        const localRepositoryPath = await input.acquireRepository(leased, input.policy);
         let predecessor: PartialCheckpoint | null = null;
         if (leased.predecessorCheckpoint) {
           predecessor = await input.coordinator.downloadCheckpoint(
@@ -291,7 +291,8 @@ export async function runContributionSession(
           }
         }
         await input.engine.purgeRun(prepared.runId);
-      } catch {
+      } catch (e) {
+        console.error("SESSION CATCH:", e);
         clearInterval(heartbeatTimer);
         sessionAbort.removeEventListener("abort", forwardAbort);
         if (sessionAbort.aborted) {

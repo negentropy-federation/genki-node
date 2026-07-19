@@ -78,6 +78,7 @@ export interface SessionPolicy {
   maxChangedFiles: number;
   maxPatchBytes: number;
   allowedExecutables: string[];
+  allowedRepositoryClasses: ("public" | "first_party_private")[];
   host: HostName;
   model: string | null;
   retainUntilVerified: boolean;

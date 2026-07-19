@@ -14,7 +14,8 @@ import { runContributionSession } from "../../packages/orchestrator/src/session.
 const execFileAsync = promisify(execFile);
 
 const fakePolicy = {
-  schemaVersion: "1" as const, durationSeconds: 3600, maxTasks: 10, maxTotalRuntimeSeconds: 3600, maxTaskRuntimeSeconds: 3600, maxChangedFiles: 10, maxPatchBytes: 1000, allowedExecutables: ["node"], allowedRepositoryClasses: ["public"] as ("public" | "first_party_private")[], host: "codex" as const, executionNetwork: "none" as const
+  schemaVersion: "1" as const, durationSeconds: 3600, maxTasks: 10, maxTotalRuntimeSeconds: 3600, maxTaskRuntimeSeconds: 3600, maxChangedFiles: 10, maxPatchBytes: 1000, allowedExecutables: ["node"],
+  allowedRepositoryClasses: ["public"] as ("public" | "first_party_private")[], host: "codex" as const, executionNetwork: "none" as const
 };
 
 async function git(cwd: string, ...args: string[]): Promise<void> {
@@ -55,6 +56,7 @@ describe("attempt evidence", () => {
         maxChangedFiles: 5,
         maxPatchBytes: 20_000,
         allowedExecutables: ["node"],
+  allowedRepositoryClasses: ["public"],
         host: "codex",
         model: null,
         retainUntilVerified: false
@@ -98,7 +100,7 @@ describe("attempt evidence", () => {
         sessionId: description.sessionId,
         policy,
         policyDigest: description.policyDigest,
-        resolveLocalRepository: (leased) => coordinator.resolveLocalRepository(leased)
+        acquireRepository: async (leased) => coordinator.resolveLocalRepository(leased)
       });
 
       const attempts = coordinator.listOperations().filter((op) => op.kind === "attempt_evidence");

@@ -44,6 +44,7 @@ function policy(): SessionPolicy {
     maxChangedFiles: 10,
     maxPatchBytes: 100_000,
     allowedExecutables: ["node"],
+  allowedRepositoryClasses: ["public"],
     host: "codex",
     model: null,
     retainUntilVerified: false
@@ -159,7 +160,7 @@ describe("runContributionSession", () => {
         sessionId: description.sessionId,
         policy: policy(),
         policyDigest: description.policyDigest,
-        resolveLocalRepository: (leased) => coordinator.resolveLocalRepository(leased),
+        acquireRepository: async (leased) => coordinator.resolveLocalRepository(leased),
         onStatus: (status) => {
           logs.push(JSON.stringify(status));
         }
@@ -230,7 +231,7 @@ describe("runContributionSession", () => {
         sessionId: description.sessionId,
         policy: policy(),
         policyDigest: description.policyDigest,
-        resolveLocalRepository: (leased) => coordinator.resolveLocalRepository(leased)
+        acquireRepository: async (leased) => coordinator.resolveLocalRepository(leased)
       });
 
       const ops = coordinator.listOperations();
@@ -277,7 +278,7 @@ describe("runContributionSession", () => {
       sessionId: description.sessionId,
       policy: policy(),
       policyDigest: description.policyDigest,
-      resolveLocalRepository: (leased) => coordinator.resolveLocalRepository(leased),
+      acquireRepository: async (leased) => coordinator.resolveLocalRepository(leased),
       abortSignal: controller.signal
     });
 
@@ -326,7 +327,7 @@ describe("runContributionSession", () => {
         sessionId: description.sessionId,
         policy: policy(),
         policyDigest: description.policyDigest,
-        resolveLocalRepository: (leased) => coordinator.resolveLocalRepository(leased),
+        acquireRepository: async (leased) => coordinator.resolveLocalRepository(leased),
         abortSignal: controller.signal
       });
 
@@ -379,7 +380,7 @@ describe("runContributionSession", () => {
         sessionId: description.sessionId,
         policy: { ...policy(), maxTasks: 1 },
         policyDigest: description.policyDigest,
-        resolveLocalRepository: (leased) => coordinator.resolveLocalRepository(leased)
+        acquireRepository: async (leased) => coordinator.resolveLocalRepository(leased)
       });
 
       expect(summary.completed).toBe(0);
@@ -436,7 +437,7 @@ describe("runContributionSession", () => {
       sessionId: "session-1",
       policy: p,
       policyDigest: "local-digest-ignored",
-      resolveLocalRepository: () => "/ignored"
+      acquireRepository: async () => "/ignored"
     });
   });
 });

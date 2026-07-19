@@ -19,6 +19,7 @@ describe("parseCliArgs", () => {
         maxChangedFiles: 20,
         maxPatchBytes: 200_000,
         allowedExecutables: ["node", "npm"],
+        allowedRepositoryClasses: ["public"],
         host: "agy",
         model: null,
         retainUntilVerified: false

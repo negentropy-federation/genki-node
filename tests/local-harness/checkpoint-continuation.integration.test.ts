@@ -83,6 +83,7 @@ describe("checkpoint continuation", () => {
         maxChangedFiles: 10,
         maxPatchBytes: 100_000,
         allowedExecutables: ["node"],
+  allowedRepositoryClasses: ["public"],
         host: "agy",
         model: null,
         retainUntilVerified: false
@@ -95,6 +96,17 @@ describe("checkpoint continuation", () => {
         taskDirectory: queue,
         leaseDurationSeconds: 30
       });
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      coordinator.downloadCheckpoint = async (_checkpointId) => {
+        for (const op of coordinator.listOperations()) {
+          if (op.kind === "checkpoint") {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const chk = op.payload as { checkpoint: any };
+            return chk.checkpoint;
+          }
+        }
+        throw new Error("not found");
+      };
 
       const agy = new ScriptedHost("agy", [
         async (input) => {
@@ -117,7 +129,7 @@ describe("checkpoint continuation", () => {
         sessionId: description.sessionId,
         policy,
         policyDigest: description.policyDigest,
-        resolveLocalRepository: (leased) => coordinator.resolveLocalRepository(leased)
+        acquireRepository: async (leased) => coordinator.resolveLocalRepository(leased)
       });
 
       expect(coordinator.getAcceptedCheckpoint("continue-task")).not.toBeNull();
@@ -153,7 +165,7 @@ describe("checkpoint continuation", () => {
         sessionId: description2.sessionId,
         policy: codexPolicy,
         policyDigest: description2.policyDigest,
-        resolveLocalRepository: (leased) => coordinator.resolveLocalRepository(leased)
+        acquireRepository: async (leased) => coordinator.resolveLocalRepository(leased)
       });
 
       const results = coordinator.listOperations().filter((op) => op.kind === "result");

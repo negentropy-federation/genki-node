@@ -67,6 +67,7 @@ const sessionPolicySchema = z
     maxChangedFiles: positiveInteger.max(MAX_CHANGED_FILES),
     maxPatchBytes: positiveInteger.max(MAX_PATCH_BYTES),
     allowedExecutables: z.array(executableName).min(1).max(32),
+    allowedRepositoryClasses: z.array(z.enum(["public", "first_party_private"])).min(1),
     host: hostNameSchema,
     model: z.string().min(1).max(200).nullable(),
     retainUntilVerified: z.boolean()
