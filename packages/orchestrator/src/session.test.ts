@@ -442,7 +442,6 @@ describe("runContributionSession", () => {
   });
   it("never advertises or accepts first_party_private for public-only policy", async () => {
     const p = policy();
-    // Override policy to be strictly public
     p.allowedRepositoryClasses = ["public"];
     const coordinator = {
       openSession: async (input: OpenSessionInput) => {
@@ -461,13 +460,23 @@ describe("runContributionSession", () => {
 
     await runContributionSession({
       engine: {
-        sessionStatus: async () => ({ state: "inactive", elapsedRuntimeSeconds: 0, retainedCheckpoints: [] }),
-        fetchTask: async () => ({ result: { status: "empty" }, artifacts: [] })
-      },
+        sessionStatus: async () => ({
+          sessionId: "session-1",
+          state: "inactive" as const,
+          completed: 0,
+          failed: 0,
+          remaining: 0,
+          elapsedSeconds: 0,
+          remainingRuntimeSeconds: 0,
+          lastOutcomeCode: null
+        })
+      } as unknown as GenkiEngine,
       coordinator,
+      host: new ScriptedHost([]),
+      sessionId: "session-1",
       policy: p,
-      contributorClaim: { displayName: null, slogan: null, email: null },
-      runAttemptId: "run-id"
+      policyDigest: "local-digest-ignored",
+      acquireRepository: async () => "/ignored"
     });
   });
 });

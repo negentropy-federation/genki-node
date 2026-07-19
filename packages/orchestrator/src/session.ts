@@ -279,9 +279,10 @@ export async function runContributionSession(
               failed: true,
               lastOutcomeCode: hostResult.outcome.toUpperCase()
             });
-            if (!input.policy.retainUntilVerified) {
-              await input.engine.purgeRun(prepared.runId);
-            }
+          }
+          // Single purge after attempt evidence (or empty host outcome) handling.
+          if (!input.policy.retainUntilVerified) {
+            await input.engine.purgeRun(prepared.runId);
           }
         } catch (e) {
           if (e instanceof CoordinatorError && e.payload.error === "stale_lease") {
@@ -290,7 +291,6 @@ export async function runContributionSession(
             throw e;
           }
         }
-        await input.engine.purgeRun(prepared.runId);
       } catch (e) {
         console.error("SESSION CATCH:", e);
         clearInterval(heartbeatTimer);

@@ -437,10 +437,18 @@ export class GenkiEngine {
   }
 
   async purgeRun(runId: string): Promise<void> {
-    const located = await this.#findRun(runId);
-    const { record: sessionRecord } = await this.#loadSession(located.record.sessionId);
-    if (!sessionRecord.policy.retainUntilVerified) {
-      await cleanupTaskRun(located.session, runId);
+    // Idempotent: a second purge after the run directory is gone is a no-op.
+    try {
+      const located = await this.#findRun(runId);
+      const { record: sessionRecord } = await this.#loadSession(located.record.sessionId);
+      if (!sessionRecord.policy.retainUntilVerified) {
+        await cleanupTaskRun(located.session, runId);
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("Unknown task run:")) {
+        return;
+      }
+      throw error;
     }
   }
 
